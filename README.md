@@ -36,7 +36,8 @@ Additional format information can be found in [here](https://github.com/haekb/io
 ![](https://raw.githubusercontent.com/haekb/io_scene_lithtech/master/doc/readme/example.png)
 
 ## Credits
-* **Colin Basnett** - Programming
-* **ReindeerFloatilla** - Research
-* **Haekb** - Programming / Research
-* **Amphos** - Programming
+* [**Colin Basnett**](https://github.com/cmbasnett) - Original Creator / Programming
+* [**ReindeerFloatilla**](https://github.com/ReindeerFloatilla) - Research
+* [**Haekb**](https://github.com/haekb) - Current Maintainer / Programming / Research 
+* [**Amphos**](https://github.com/Five-Damned-Dollarz) - Programming
+* [**Psycrow**](https://github.com/Psycrow101) - Programming
