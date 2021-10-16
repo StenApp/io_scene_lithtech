@@ -301,11 +301,12 @@ def import_model(model, options):
 
         armature_object.animation_data_create()
 
-        for obj in armature_object.children:
-            obj.shape_key_add(name="neutral_pose", from_mix=False)
-        # we'll animate using mesh.shape_keys.eval_time
-        mesh.shape_keys.animation_data_create()
-        mesh.shape_keys.use_relative = False
+        if options.should_import_vertex_animations:
+            for obj in armature_object.children:
+                obj.shape_key_add(name="neutral_pose", from_mix=False)
+                # we'll animate using mesh.shape_keys.eval_time
+                mesh.shape_keys.animation_data_create()
+                mesh.shape_keys.use_relative = False
 
         actions = []
         md_actions = []
@@ -411,8 +412,9 @@ def import_model(model, options):
                 md_actions.append(md_action)
 
         # Add our actions to animation data
-        armature_object.animation_data.action = actions[0]
-        if options.should_import_vertex_animations:
+        if actions:
+            armature_object.animation_data.action = actions[0]
+        if md_actions:
             mesh.shape_keys.animation_data.action = md_actions[0]
 
     ''' Vertex Animations '''
