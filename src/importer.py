@@ -305,8 +305,8 @@ def import_model(model, options):
             for obj in armature_object.children:
                 obj.shape_key_add(name="neutral_pose", from_mix=False)
                 # we'll animate using mesh.shape_keys.eval_time
-                mesh.shape_keys.animation_data_create()
-                mesh.shape_keys.use_relative = False
+            mesh.shape_keys.animation_data_create()
+            mesh.shape_keys.use_relative = False
 
         actions = []
         md_actions = []
