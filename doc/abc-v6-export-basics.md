@@ -16,7 +16,7 @@ Next, make a mesh, and set its parent to the armature you just made. Then add an
 
 ![](./abc-v6-export-basics/mesh_armature_modifier.png)
 
-For every bone in your armature, the mesh *must* have a corresponding vertex group with the same name. Assign vertices you want to be affected by the bone here with a weight 1. *Never* assign multiple nodes to the same vertex, that is not supported by the format.
+For every bone in your armature, the mesh *must* have a corresponding vertex group with the same name. Assign vertices you want to be affected by the bone here with a weight 1. *All* vertices must be assigned to a vertex group. *Never* assign multiple nodes to the same vertex, that is not supported by the format.
 
 Finally create an action. Actions start at frame 0, and must have at least 1 keyframe. Actions named with a "d_" prefix will not be exported, it is expected these contain vertex animation keyframes.
 
