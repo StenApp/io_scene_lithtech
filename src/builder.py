@@ -161,6 +161,9 @@ class ModelBuilder(object):
             for piece in model.pieces:
                 for lod in piece.lods:
                     for vertex in lod.vertices:
+                        if len(vertex.weights) == 0:
+                            raise Exception('Piece \'{}\' has one or more vertices with no assigned weight, check Weight Paint mode.'.format(piece.name))
+
                         if vertex.weights[0].node_index == bone_index:
                             node.bounds_min = Vector((min(node.bounds_min.x, vertex.location.x), min(node.bounds_min.y, vertex.location.y), min(node.bounds_min.z, vertex.location.z)))
                             node.bounds_max = Vector((max(node.bounds_min.x, vertex.location.x), max(node.bounds_min.y, vertex.location.y), max(node.bounds_min.z, vertex.location.z)))

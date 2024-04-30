@@ -159,6 +159,13 @@ struct PieceInfo {
     uint32 PieceCount;
 };
 
+enum <int> eMeshType
+{
+    Rigid = 4,
+    Skeletal = 5,
+    VertexAnimated = 6,
+};
+
 struct Piece {
     uint32 NodeReference;//Padding1;
     float SpecularPower;
@@ -168,7 +175,7 @@ struct Piece {
     uint32 TextureIndex; // Maybe?
     uint32 Unknown[2];
     int Four;
-    int MeshType; // Basically confirmed
+    eMeshType MeshType; // Basically confirmed
 };
 
 struct Node {
@@ -437,7 +444,7 @@ local int pad = 0;
 
 // Okay, let's loop through the pieces
 //for(i = 0; i < pieceInfo.PieceCount; i++)
-if (false)
+if (true)
 {
     Printf("----------\nNew Piece\n");
 
