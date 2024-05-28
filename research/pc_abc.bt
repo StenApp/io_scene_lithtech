@@ -109,7 +109,7 @@ struct Piece (uint32 LODCount) {
     uint16 MaterialIndex;
     float SpecularPower;
     float SpecularScale;
-    //float LODWeight;
+    float LODWeight;
     uint16 Unknown;
     LTString Name;
     LOD LODs[LODCount] <optimize=false>;
