@@ -906,10 +906,10 @@ class PS2LTBModelReader(object):
 
                 # Add the piece to the model!
                 model.pieces.append(piece_object) 
-            # End For `piece_index in range( piece_count )`
 
-            print("Final verticies ", len(lod.vertices))
-            print("Final faces ", len(lod.faces))
+                print("Final vertices ", len(lod.vertices))
+                print("Final faces ", len(lod.faces))
+                # End For `piece_index in range( piece_count )`
 
             # Handle Nodes!
             f.seek(node_offset)
