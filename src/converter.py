@@ -41,10 +41,6 @@ class ConvertPS2LTBToLTA(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         model = PS2LTBModelReader().from_file(self.filepath)
         model.name = os.path.splitext(os.path.basename(self.filepath))[0]
 
-        # Fill in some parts of the model we currently dont..
-        stubber = ModelStubber()
-        model = stubber.execute(model)
-
         ltb_path = self.filepath
         lta_path = self.filepath.replace('ltb', 'lta')
         lta_path = lta_path.replace('LTB', 'lta')
@@ -82,10 +78,6 @@ class ConvertPCLTBToLTA(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         # Import the model
         model = PCLTBModelReader().from_file(self.filepath)
         model.name = os.path.splitext(os.path.basename(self.filepath))[0]
-
-        # Fill in some parts of the model we currently dont..
-        #stubber = ModelStubber()
-        #model = stubber.execute(model)
 
         ltb_path = self.filepath
         lta_path = self.filepath.replace('ltb', 'lta')

@@ -105,20 +105,21 @@ struct LOD {
     Vertex Vertices[VertexCount] <optimize=false>;
 };
 
-struct Piece (uint32 LODCount) {
+struct Piece (Header &hdr) {
     uint16 MaterialIndex;
     float SpecularPower;
     float SpecularScale;
-    //float LODWeight;
+    if (hdr.Version==12)
+        float LODWeight;
     uint16 Unknown;
     LTString Name;
-    LOD LODs[LODCount] <optimize=false>;
+    LOD LODs[hdr.LODCount] <optimize=false>;
 };
 
-struct PieceHeader (uint32 LODCount) {
+struct PieceHeader (Header &hdr) {
     uint32 WeightCount;
     uint32 PieceCount;
-    Piece Pieces(LODCount)[PieceCount] <optimize=false>;
+    Piece Pieces(hdr)[PieceCount] <optimize=false>;
 };
 
 //
@@ -232,7 +233,7 @@ Section section;
 Header hdr;
 
 Section pieceSection;
-PieceHeader piece(hdr.LODCount);
+PieceHeader piece(hdr);
 
 Section nodeSection;
 Node nodes[hdr.NodeCount]  <optimize=false>;
