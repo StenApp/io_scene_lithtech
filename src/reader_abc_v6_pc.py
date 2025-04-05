@@ -173,7 +173,7 @@ class ABCV6ModelReader(object):
     def _read_transform(self, f):
         transform = Animation.Keyframe.Transform()
         transform.location = self._read_vector(f)
-        transform.rotation = self._read_quaternion(f)
+        transform.rotation = self._read_quaternion(f).normalized()
         return transform
 
     def _read_vertex_transform(self, f):
