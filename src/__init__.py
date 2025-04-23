@@ -92,4 +92,4 @@ def unregister():
     bpy.types.TOPBAR_MT_file_import.remove(converter.ConvertPS2LTBToLTA.menu_func_import)
     
     # Helpers
-    vertex_normals.uregister()
+    vertex_normals.unregister()
