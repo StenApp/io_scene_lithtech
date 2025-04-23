@@ -226,8 +226,8 @@ def import_model(model, options):
             bm.free()
             
             # Check if LOD normals are found
-            if lod.normals:
-                custom_normals = lod.normals
+            if len(lod.get_normals()):
+                custom_normals = lod.get_normals()
             else:
                 # Fallback to Blender's smooth normals if no LOD normals are found
                 custom_normals = mesh.calculate_smooth_normals()

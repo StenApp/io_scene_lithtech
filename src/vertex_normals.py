@@ -51,7 +51,7 @@ def build_model_vertex_normals(obj):
     mesh.normals_split_custom_set_from_vertices(new_normals)
     obj.data.update()
 
-class LITHTECHPanel(bpy.types.Panel):
+class LithtechPanel(bpy.types.Panel):
     """Creates a Panel in the LITHTECH category"""
     bl_label = "LITHTECH Helpers"
     bl_idname = "OBJECT_PT_vertex_normals"
@@ -79,12 +79,12 @@ class BuildVertexNormalsOperator(bpy.types.Operator):
 
 
 def register():
-    bpy.utils.register_class(LITHTECHPanel)
+    bpy.utils.register_class(LithtechPanel)
     bpy.utils.register_class(BuildVertexNormalsOperator)
 
 
 def unregister():
-    bpy.utils.unregister_class(LITHTECHPanel)
+    bpy.utils.unregister_class(LithtechPanel)
     bpy.utils.unregister_class(BuildVertexNormalsOperator)
 
 
