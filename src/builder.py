@@ -81,7 +81,14 @@ class ModelBuilder(object):
                 bone_indices[bone] = i
 
             ''' Vertices '''
-            for (vertex_index, vertex) in enumerate(mesh.vertices):
+            corner_normals = [loop.normal for loop in mesh.loops]
+            mesh.normals_split_custom_set(corner_normals)
+            mesh.update()
+
+            # Access the loop normals
+            loop_normals = [loop.normal for loop in mesh.loops]
+
+            for vertex_index, vertex in enumerate(mesh.vertices):
                 weights = []
                 for vertex_group in mesh_object.vertex_groups:
 
@@ -102,13 +109,20 @@ class ModelBuilder(object):
                     except RuntimeError:
                         pass
 
-
                 # Note: This corrects any rotation done on import
                 rot = Matrix.Rotation(radians(-180), 4, 'Z') @ Matrix.Rotation(radians(90), 4, 'X')
 
                 v = Vertex()
                 v.location = vertex.co @ rot
-                v.normal = vertex.normal
+
+                # Replace vertex.normal with the average loop normal for this vertex
+                vertex_loop_normals = [
+                    loop_normals[loop_index]
+                    for loop_index in range(len(mesh.loops))
+                    if mesh.loops[loop_index].vertex_index == vertex_index
+                ]
+                v.normal = sum(vertex_loop_normals, Vector()) / len(vertex_loop_normals) if vertex_loop_normals else vertex.normal
+
                 v.weights.extend(weights)
                 lod.vertices.append(v)
 
@@ -263,7 +277,7 @@ class ModelBuilder(object):
                 scaled_time = time * (1.0 / get_framerate())
 
                 subframe_time = time - floor(time)
-                bpy.context.scene.frame_set(time, subframe = subframe_time)
+                bpy.context.scene.frame_set(int(time), subframe = subframe_time)
 
                 keyframe = Animation.Keyframe()
                 keyframe.time = scaled_time
@@ -300,7 +314,7 @@ class ModelBuilder(object):
                     scaled_time = time * (1.0 / get_framerate())
 
                     subframe_time = time - floor(time)
-                    bpy.context.scene.frame_set(time, subframe = subframe_time)
+                    bpy.context.scene.frame_set(int(time), subframe = subframe_time)
 
                     transform = Animation.Keyframe.Transform()
 

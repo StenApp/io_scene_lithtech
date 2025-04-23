@@ -26,6 +26,7 @@ if 'bpy' in locals():
     if 'importer'           in locals(): importlib.reload(importer)
     if 'exporter'           in locals(): importlib.reload(exporter)
     if 'converter'          in locals(): importlib.reload(converter)
+    if 'vertex_normals'     in locals(): importlib.reload(vertex_normals)
 
 import bpy
 from . import hash_ps2
@@ -40,6 +41,7 @@ from . import writer_lta_pc
 from . import importer
 from . import exporter
 from . import converter
+from . import vertex_normals
 
 
 from bpy.utils import register_class, unregister_class
@@ -68,6 +70,9 @@ def register():
     # Converters
     bpy.types.TOPBAR_MT_file_import.append(converter.ConvertPCLTBToLTA.menu_func_import)
     bpy.types.TOPBAR_MT_file_import.append(converter.ConvertPS2LTBToLTA.menu_func_import)
+    
+    # Helpers
+    vertex_normals.register()
 
 
 def unregister():
@@ -85,3 +90,6 @@ def unregister():
     # Converters
     bpy.types.TOPBAR_MT_file_import.remove(converter.ConvertPCLTBToLTA.menu_func_import)
     bpy.types.TOPBAR_MT_file_import.remove(converter.ConvertPS2LTBToLTA.menu_func_import)
+    
+    # Helpers
+    vertex_normals.unregister()
