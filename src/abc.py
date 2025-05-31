@@ -20,11 +20,14 @@ integers cannot be pass-by-reference.
 def node_iterator(nodes, nit=None, parent=None):
     if nit is None:
         nit = iter(nodes)
-    node = next(nit)
-    yield (node, parent)
-    for i in range(node.child_count):
-        yield from node_iterator(nodes, nit, node)
-
+    try:
+        node = next(nit)
+        yield (node, parent)
+        for i in range(node.child_count):
+            yield from node_iterator(nodes, nit, node)
+    except StopIteration:
+        # No more nodes to process, just return
+        return
 
 def build_undirected_tree(nodes):
     for (node, parent) in node_iterator(nodes):
@@ -53,6 +56,9 @@ class Vertex(object):
 
         # LTB specific
         self.colour = 0
+        # NEW: Add these to preserve original object-space data
+        self.original_location = None  # Original object-space position from LTB
+        self.original_normal = None    # Original object-space normal from LTB
 
 
 class FaceVertex(object):
@@ -113,6 +119,8 @@ class Piece(object):
         self.lod_weight = 1.0
         self.name = ''
         self.lods = []
+        
+        self.node_index = -1
 
         # LTB specific
         self.lod_min = 0.0

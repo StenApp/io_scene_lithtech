@@ -9,18 +9,11 @@ from .hash_ps2 import HashLookUp
 
 #########################################################################################
 # PS2 LTB Model Reader by Jake Breen
-# 
-# Heavily WIP and won't import much right now
-# Based off the original ModelReader (now ABCModelReader)
-# This will only work with NOLF1 for PS2. 
-# If you're aware of other Lithtech PS2 games please notify me! 
-# 
-# See the 010 Editor Template file for the latest info on the format.
+# Modified to better match the BT file structure
+# Based on ps2-ltb-bt6.bt template
 #########################################################################################
 
-# Some constant values to make things slightly more readable:
-
-# Required checks
+# Constants remain the same
 # PS2 LTB
 REQUESTED_FILE_TYPE = 2
 # Version of the LTB
@@ -36,18 +29,14 @@ WO_NORMAL = 0x412
 WO_REVERSED = 0x8412
 
 # Vif commands
-# From various sources:
-# https://gtamods.com/wiki/PS2_Native_Geometry
-# https://github.com/PCSX2/pcsx2/blob/master/pcsx2/Vif_Codes.cpp
 VIF_FLUSH = 0x11
-VIF_MSCALF = 0x15000000 # This one likes extra precision
-VIF_DIRECT = 0x50 # This is not in the "CMD" spot, so it might just be an application specific data
+VIF_MSCALF = 0x15000000
+VIF_DIRECT = 0x50
 VIF_UNPACK = 0x6C
 
 FLOAT_COMPARE = 1e-04
 
-# PS2 VIF Command
-# Used to tell the ps2 what to do with the data I guess
+# Classes remain the same
 class VIFCommand(object):
     def __init__(self):
         self.constant = 0
@@ -79,70 +68,42 @@ class LocalFace(object):
         self.group_id = 0
         self.face_vertex = FaceVertex()
 
-# End Class
-
+# VertexList remains the same
 class VertexList(object):
     def __init__(self):
         self.auto_increment = 0
         self.groups = []
-
-        # List of LocalVertex
         self.list = []
-
-        # List of LocalFace
         self.face_verts = []
-
-        # List of Faces (generated)
         self.faces = []
     
     def append(self, vertex, group_id, face_vertex, unknown_flag = False):
-
-        # Create the "local vertex"
-        # We store extra info so we can accurately merge duplicates while keeping the mesh set group ids
+        # Method implementation remains the same
         local_vertex = LocalVertex()
         local_vertex.id = self.auto_increment
         local_vertex.vertex = vertex
         local_vertex.merge_string = self.generate_merge_string(vertex.location)
         local_vertex.associated_ids.append(group_id)
 
-        # Assign the list count as the vertex index (This will be overridden later if this vertex is a dupe)
         local_face = LocalFace()
         local_face.group_id = group_id
 
-        # Check if the vertex is already in the list (dupe check)
-        # If it is, we want the id
         vertex_index = self.find_in_list(local_vertex.merge_string)
 
-        #print("Got Vertex ID: ",vertex_index)
-
-        # Either append our unique vertex, or adjust the face vertex's index with the originals.
         if vertex_index == -1:
-            #print("Appending ", local_vertex)
             self.list.append(local_vertex)
-
-            # If the vert is not found, let's use our auto inc, and inc that after!
             vertex_index = self.auto_increment
             self.auto_increment += 1
         else:
             self.list[vertex_index].associated_ids.append(group_id)
             
-
         face_vertex.vertex_index = vertex_index
-
-        # Finally append the face vertex to the local face
         local_face.face_vertex = face_vertex
-
-        # Gross, but it'll do.
         self.groups.append(group_id)
         self.groups = list(set(self.groups))
-
-        # Save the face vertex
         self.face_verts.append(local_face)
 
-
-        
-
-    # Loop through all our grouped faces and generate faces based off the vertex_index
+    # Other methods remain the same
     def generate_faces(self):
         faces = []
 
@@ -151,7 +112,6 @@ class VertexList(object):
         print("Groups: ",self.groups)
         
         for j in range( len(self.groups) ):
-            # Generate the faces with alternating order
             flip = False
             group_id = self.groups[j]
             grouped_faces = []
@@ -163,7 +123,6 @@ class VertexList(object):
                     continue
 
                 grouped_faces.append(face_vert)
-            # End Face Verts
             
             for i in range( len(grouped_faces) ):
                 if i < 2:
@@ -184,18 +143,9 @@ class VertexList(object):
 
                 faces.append(face)
                 flip = not flip
-            # End Grouped Faces
-        # End Groups
-
-                
-        # End For
 
         self.faces = faces
-    # End of Generate Faces
 
-    # Find the requested merge_string in a list
-    # Return the position if true,
-    # Return -1 if false.
     def find_in_list(self, merge_string):
         for i in range( len(self.list) ):
             if merge_string == self.list[i].merge_string:
@@ -205,7 +155,6 @@ class VertexList(object):
 
     def generate_merge_string(self, vector):
         return "%f/%f/%f" % (vector.x, vector.y, vector.z)
-
 
     def get_vertex_list(self):
         print("Getting vertex list! Length: %d" % len(self.list))
@@ -217,24 +166,19 @@ class VertexList(object):
 
     def get_face_list(self):
         return self.faces
-# End Class
 
+# Modified PS2LTBModelReader
 class PS2LTBModelReader(object):
     def __init__(self):
         self._file_type = 0
         self._version = 0
         self._node_count = 0
         self._lod_count = 0
-
-        # Hack to count sockets
         self._socket_counter = 0
-
-        # Hack to count animation names
         self._animations_processed = 0
-
         self._hasher = None
 
-    # Leftovers from ABC Model Reader
+    # Utility methods remain the same
     def _read_matrix(self, f):
         data = unpack('16f', f)
         rows = [data[0:4], data[4:8], data[8:12], data[12:16]]
@@ -248,7 +192,13 @@ class PS2LTBModelReader(object):
         return Quaternion((w, x, y, z))
 
     def _read_string(self, f):
-        return f.read(unpack('H', f)[0]).decode('ascii')
+        try:
+            string_length = unpack('H', f)[0]
+            return f.read(string_length).decode('ascii')
+        except UnicodeDecodeError:
+            # Return a placeholder name if we encounter decoding issues
+            f.seek(f.tell() - 2)  # Go back to before the string length
+            return "UnknownName"
 
     def _read_weight(self, f):
         weight = Weight()
@@ -304,43 +254,39 @@ class PS2LTBModelReader(object):
         f.seek(4, 1) 
         node.child_count = unpack('I', f)[0]
         node.index = unpack('H', f)[0]
-        # Not confirmed, but likely!
-        #node.flag = unpack('H', f)[0]
         f.seek(2, 1)
         return node
 
     def _read_transform(self, f):
-
         transform = Animation.Keyframe.Transform()
-
-        # Unpack and transform the values
+        
         location = unpack('3h', f)
-        location_small_scale = unpack('h', f)[0] # Flag
+        location_small_scale = unpack('h', f)[0]
         rotation = unpack('4h', f)
-
-        # Constants..kinda. If location small scale is 0, then SCALE_LOC can change.
+        
         SCALE_ROT = 0x4000
         SCALE_LOC = 0x10
-
+        
         if location_small_scale == 0:
             SCALE_LOC = 0x1000
-
+            
         transform.location.x = location[0] / SCALE_LOC
         transform.location.y = location[1] / SCALE_LOC
         transform.location.z = location[2] / SCALE_LOC
-
+        
         transform.rotation.x = rotation[0] / SCALE_ROT
         transform.rotation.y = rotation[1] / SCALE_ROT
         transform.rotation.z = rotation[2] / SCALE_ROT
         transform.rotation.w = rotation[3] / SCALE_ROT
-
+        
         return transform
 
     def _read_child_model(self, f):
+        #only for character models, we count ourselves as 1!
         child_model = ChildModel()
         child_model.name = self._read_string(f)
-        child_model.build_number = unpack('I', f)[0]
-        child_model.transforms = [self._read_transform(f) for _ in range(self._node_count)]
+        #child_model.build_number = unpack('I', f)[0]
+        #child_model.transforms = [self._read_transform(f) for _ in range(self._node_count)]
         return child_model
 
     def _read_keyframe(self, f):
@@ -353,7 +299,7 @@ class PS2LTBModelReader(object):
         animation = Animation()
         animation.name = "Animation_%d" % self._animations_processed
         animation.extents = self._read_vector(f)
-
+        
         unknown_vector_maybe = self._read_vector(f)
         hashed_string = unpack('I', f)[0]
         animation.interpolation_time = unpack('I', f)[0]
@@ -364,42 +310,35 @@ class PS2LTBModelReader(object):
             start_marker = unpack('I', f)[0]
             animation.node_keyframe_transforms.append(
                 [self._read_transform(f) for _ in range(animation.keyframe_count)])
-
+                
         self._animations_processed += 1
-
-        # Check if we can figure out the hashed string
+        
         looked_up_value = self._hasher.lookup_hash(hashed_string, "animations")
-
+        
         if (looked_up_value != None):
             animation.name = looked_up_value
-
+            
         return animation
-    # End Function
-
     
     def _read_socket(self, f):
         socket = Socket()
-        # We don't know all the values here, so skip the ones we can't use yet.
-        # Refer to the bt file for exact specs
         f.seek(4, 1)
         socket.rotation = self._read_quaternion(f)
         socket.location = self._read_vector(f)
         f.seek(4, 1)
         socket.node_index = unpack('I', f)[0]
         hashed_string = unpack('I', f)[0]
-
+        
         f.seek(4, 1)
-
-        # Fill in some missing data
+        
         socket.name = "Socket" + str(self._socket_counter)
         self._socket_counter += 1
-
-        # Check if we can figure out the hashed string
+        
         looked_up_value = self._hasher.lookup_hash(hashed_string, "sockets")
-
+        
         if (looked_up_value != None):
             socket.name = looked_up_value
-
+            
         return socket
 
     def _read_anim_binding(self, f):
@@ -411,28 +350,170 @@ class PS2LTBModelReader(object):
 
     def _read_weight_set(self, f):
         weight_set = WeightSet()
-        weight_set.name = self._read_string(f)
+        # First read the ID
+        weight_set.id = unpack('I', f)[0]
+        # Then read the node count
         node_count = unpack('I', f)[0]
+        # Read weights for each node
         weight_set.node_weights = [unpack('f', f)[0] for _ in range(node_count)]
         return weight_set
+        
+        
+    def _apply_piece_attachments(self, model):
+        """
+        Apply proper positioning for pieces based on their mesh type and node binding.
+        Uses node_binding field to determine attachment behavior.
+        """
+        print("=== APPLYING PIECE POSITIONING ===")
+        
+        for piece_index, piece in enumerate(model.pieces):
+            print(f"\nProcessing Piece {piece_index}: {piece.name}")
+            
+            # Only process LOD 0 (highest detail)
+            if not piece.lods or len(piece.lods) == 0:
+                print(f"  ⚠️  No LODs found for piece {piece_index}")
+                continue
+                
+            lod = piece.lods[0]  # Use primary LOD
+            
+            if not hasattr(lod, 'node_binding'):
+                print(f"  ⚠️  No node_binding found for piece {piece_index}")
+                continue
+            
+            print(f"  LOD 0 - MeshType: {lod.mesh_type}, NodeBinding: {lod.node_binding}")
+            
+            success = False
+            if lod.mesh_type == MT_RIGID:
+                success = self._position_rigid_mesh(piece, lod, model, piece_index)
+            elif lod.mesh_type == MT_SKELETAL:
+                success = self._position_skeletal_mesh(piece, lod, model, piece_index)
+            elif lod.node_binding == 0:
+                success = self._position_world_object(piece, piece_index)
+            else:
+                print(f"  ⚠️  Unknown mesh type {lod.mesh_type} for piece {piece_index}")
+            
+            if success:
+                print(f"  ✅ Successfully positioned piece {piece_index}")
+            else:
+                print(f"  ❌ Failed to position piece {piece_index}")
 
-    # Rough WIP
+    def _position_rigid_mesh(self, piece, lod, model, piece_index):
+        """
+        Position rigid mesh pieces. For rigid meshes, node_binding = target node index.
+        Vertices are stored in object space relative to the attachment bone.
+        """
+        node_index = lod.node_binding
+        
+        if not (0 <= node_index < len(model.nodes)):
+            print(f"  ❌ Rigid mesh node index {node_index} out of range (max: {len(model.nodes)-1})")
+            return False
+        
+        target_node = model.nodes[node_index]
+        print(f"  ✅ Rigid mesh attached to Node {node_index} ({target_node.name})")
+        
+        # Store attachment info for both piece and LOD
+        piece.mesh_type = MT_RIGID
+        piece.attached_node_index = node_index
+        piece.attachment_transform = target_node.bind_matrix
+        piece.is_rigid_mesh = True
+        
+        # Extract and display position
+        pos = target_node.bind_matrix.translation
+        print(f"     Target Position: ({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f})")
+        
+        # PRESERVE ORIGINAL DATA: Store both original (object space) and transformed (world space) data
+        print(f"     Preserving original object-space data for {len(lod.vertices)} vertices")
+        for vertex in lod.vertices:
+            # Store original position and normal (object space - what's in the LTB file)
+            vertex.original_location = vertex.location.copy()
+            vertex.original_normal = vertex.normal.copy()
+            
+            # Transform for Blender display (world space)
+            vertex.location = target_node.bind_matrix @ vertex.location
+            vertex.normal = target_node.bind_matrix.to_3x3() @ vertex.normal
+            vertex.normal.normalize()
+        
+        # Set up weights for all vertices to attach to the single bone
+        print(f"     Setting up rigid mesh weights for {len(lod.vertices)} vertices")
+        for vertex in lod.vertices:
+            # Clear any existing weights
+            vertex.weights = []
+            
+            # Create single weight pointing to attachment bone
+            weight = Weight()
+            weight.node_index = node_index
+            weight.location = vertex.original_location  # Use original object space location
+            weight.bias = 1.0  # Full weight to attachment bone
+            vertex.weights.append(weight)
+        
+        print(f"     ✅ Set rigid mesh weights: all vertices → Node {node_index}")
+        return True
+
+    # REMOVE the separate _transform_rigid_vertices method call since we do it inline now
+
+    def _position_skeletal_mesh(self, piece, lod, model, piece_index):
+        """
+        Position skeletal mesh pieces. For skeletal meshes, node_binding = bone count.
+        Vertices should already have bone weights assigned.
+        """
+        bone_count = lod.node_binding
+        print(f"  ✅ Skeletal mesh with {bone_count} bones")
+        
+        # Verify vertices have bone weights
+        if not hasattr(lod, 'vertices') or len(lod.vertices) == 0:
+            print(f"     ⚠️  No vertices found")
+            return False
+        
+        # Check if vertices have valid bone weights
+        weighted_vertices = 0
+        for vertex in lod.vertices:
+            if hasattr(vertex, 'weights') and len(vertex.weights) > 0:
+                weighted_vertices += 1
+        
+        if weighted_vertices > 0:
+            print(f"     ✅ {weighted_vertices}/{len(lod.vertices)} vertices have bone weights")
+            piece.attached_node_index = -1  # No single attachment
+            piece.attachment_transform = Matrix.Identity(4)
+            piece.is_rigid_mesh = False
+            return True
+        else:
+            print(f"     ⚠️  No vertices have bone weights - may need manual binding")
+            return False
+
+    def _position_world_object(self, piece, piece_index):
+        """
+        Position world objects. These pieces have no bone attachment and remain at world coordinates.
+        """
+        print(f"  ✅ World object - no attachment needed")
+        piece.attached_node_index = -1
+        piece.attachment_transform = Matrix.Identity(4)
+        piece.is_rigid_mesh = False
+        return True
+
+    # Modified main method to better follow BT structure and support LODs with individual mesh types
     def from_file(self, path):
         model = Model()
-        model.name = os.path.splitext(os.path.basename(path))[0]
+        #model.name = os.path.splitext(os.path.basename(path))[0]
+        filename = os.path.basename(path)
+        model.name = os.path.splitext(filename)[0]
+    
+        print(f"=== Opening PS2 LTB file: {filename} ===")
 
         with open(path, 'rb') as f:
-
-            # Header
+            # Header section
             self._file_type = unpack('i', f)[0]
-            self._version = unpack('i', f)[0]
-
+            self._version = unpack('h', f)[0]
+            
+            reserved1 = unpack('h', f)[0]  # Reserved1
+            reserved2 = unpack('i', f)[0]  # Reserved2
+            reserved3 = unpack('i', f)[0]  # Reserved3
+            reserved4 = unpack('i', f)[0]  # Reserved4
+            
             print("-------------------------------")
             print("LithTech LTB (PS2) Model Reader")
             print("Loading ltb version %d" % self._version)
 
-            # TODO: This should be done before ModelReader, 
-            # so we can split off to ltb (pc) and ltb (ps2) as needed.
+            # Verify file type and version
             if self._file_type is not REQUESTED_FILE_TYPE:
                 message = "LTB Importer only supports PS2 LTB files."
                 raise Exception(message)
@@ -441,10 +522,7 @@ class PS2LTBModelReader(object):
                 message = "LTB Importer only supports version %d." % REQUESTED_VERSION
                 raise Exception(message)
 
-            # Skip past the 3 unknown ints
-            f.seek(12, 1)
-
-            # The position for this offset section...
+            # Read offsets from header
             offset_offset = unpack('i', f)[0]
             piece_offset = unpack('i', f)[0]
             node_offset = unpack('i', f)[0]
@@ -452,478 +530,481 @@ class PS2LTBModelReader(object):
             animation_offset = unpack('i', f)[0]
             socket_offset = unpack('i', f)[0]
             file_size = unpack('i', f)[0]
-            unknown = unpack('i', f)[0]
-            # End Header
-
-            # Model Info
-            keyframe_count = unpack('i', f)[0]
-            animation_count = unpack('i', f)[0]
-            self._node_count = unpack('i', f)[0]
-            piece_count = unpack('i', f)[0]
-            child_model_count = unpack('i', f)[0]
-            triangle_count = unpack('i', f)[0]
-            vertex_count = unpack('i', f)[0]
-            weight_count = unpack('i', f)[0]
-            lod_count = unpack('i', f)[0]
-            socket_count = unpack('i', f)[0]
-            weight_set_count = unpack('i', f)[0]
-            string_count = unpack('i', f)[0]
-            string_length_count = unpack('i', f)[0]
-            model_info_unknown = unpack('i', f)[0]
             
+            padding = unpack('i', f)[0]  # Additional padding/unknown
+
+            # Read model info
+            keyframe_count = unpack('i', f)[0]  # KeyframeCount
+            animation_count = unpack('i', f)[0]  # AnimationCount
+            self._node_count = unpack('i', f)[0]  # NodeCount
+            piece_count = unpack('i', f)[0]  # PieceCount
+            child_model_count = unpack('i', f)[0]  # ChildModelCount
+            triangle_count = unpack('i', f)[0]  # TriangleCount
+            vertex_count = unpack('i', f)[0]  # VertexCount
+            weight_count = unpack('i', f)[0]  # WeightCount
+            self._lod_count = unpack('i', f)[0]  # LODCount
+            socket_count = unpack('i', f)[0]  # SocketCount
+            weight_set_count = unpack('i', f)[0]  # WeightSetCount
+            string_count = unpack('i', f)[0]  # StringCount
+            string_length_count = unpack('i', f)[0]  # StringLengthCount
+            model_info_unknown = unpack('i', f)[0]  # Unknown
+            
+            # Read command string
             model.command_string = self._read_string(f)
             model.internal_radius = unpack('f', f)[0]
-            # End Model Info
 
-            # Piece Header
-            hash_magic_number = unpack('i', f)[0]
-            f.seek(4 * 2, 1)
-            # End Piece Header
+            # Read ModelInfoExtended
+            hash_magic_number = unpack('i', f)[0]  # HashValue
+            model_info_unk1 = unpack('i', f)[0]  # Unk1
+            model_info_unk2 = unpack('i', f)[0]  # Unk2
 
-            # Setup our hasher
+            # Setup hasher
             self._hasher = HashLookUp(hash_magic_number)
-
-
-            # We can have multiple pieces!
-            for piece_index in range( piece_count ):
+            
+            # Navigate to piece section using offset
+            f.seek(piece_offset)
+            
+            # Read PieceInfo structure
+            piece_info_count = unpack('i', f)[0]
+            print(f"Found {piece_info_count} pieces in PieceInfo")
+            
+            # Process each piece according to BT structure
+            for piece_index in range(piece_info_count):
                 print("------------------------------------")
-                print("New Piece!")
-
-                # Used when loading the actual mesh data
-                # If the previous chunk was 13kb+, 
-                # then we need to peek and see if there's more data instead of the next piece
-                check_for_more_data = False
-
-                #########################################################################
-                # FIXME: This probably isn't needed anymore.
-                # HACK: Skip past any bone information, we're going to be looking for 0.8, 0.8, 0.8!
-                # Skip past the unknown value
-                f.seek(4, 1)
-
-                exit_piece_early = False
-
-                print ("HACK: Looking for Vector3 of 0.8f")
-                while True:
-                    try:
-                        hero_eights = [ unpack('f', f)[0], unpack('f', f)[0], unpack('f', f)[0] ]
-
-                        if math.isclose(hero_eights[0], 0.8, rel_tol=FLOAT_COMPARE) and math.isclose(hero_eights[1], 0.8, rel_tol=FLOAT_COMPARE) and math.isclose(hero_eights[2], 0.8, rel_tol=FLOAT_COMPARE):
-                            print("Found 0.8,0.8,0.8")
-                            break
-
-                        # We only want to move up one!
-                        f.seek(-4*2, 1)
-                    except struct.error as err:
-                        exit_piece_early = True
-                        print("Could not find Vector3 of 0.8f, reached end of file.")
-                        break
-                        
-                if exit_piece_early == True:
-                    break
-
-                # Revert back to our original position
-                f.seek(-(4*5), 1) 
-                # End Hack !
-                #########################################################################
-
-                # Piece
-                f.seek(4 * 14, 1)
-
-                # Handy!
-                texture_index = unpack('i', f)[0]
-
-                # Skip past 3 unknowns
-                f.seek(4 * 3, 1)
-
-                mesh_type = unpack('i', f)[0]
-                # End Piece
-
-                if mesh_type is MT_RIGID:
-                    print("Rigid Mesh")
-                elif mesh_type is MT_SKELETAL:
-                    print("Skeletal Mesh")
-                elif mesh_type is MT_VERTEX_ANIMATED: # Haven't tested or found a VA mesh!
-                    print("Vertex Animated Mesh")
-
-                # LODs
-                finished_lods = False
-    
-                lod = LOD()
-                vertex_list = VertexList()
-                mesh_set_index = 1 # this gets multiplied
-                mesh_index = 0 # triangle_count + vertex_count
-
-                # Amount of shorts that make up the unknown section before vertex weighting information
-                lod_skeletal_unk_sector_count = 0
-
-                # There's two additional ints with skeletal meshes 
-                if mesh_type is MT_SKELETAL:
-                    f.seek( 4 , 1)
-                    lod_skeletal_unk_sector_count = unpack('i', f)[0]
-
-                # These are used for our vertex weights!
-                lod_vertex_count = unpack('i', f)[0]
-                lod_weighted_nodes_count = unpack('i', f)[0]
-
-                # Haven't mapped out pieces yet...
+                print(f"Processing Piece {piece_index}")
+                
+                # Read Piece structure
+                hashed_piece_name = unpack('i', f)[0]  # HashedPieceName
+                specular_power = unpack('f', f)[0]     # SpecularPower
+                specular_scale = unpack('f', f)[0]     # SpecularScale
+                lod_weight = unpack('f', f)[0]         # LODWeight
+                
+                # Skip floaty padding (9 floats)
+                f.seek(4 * 9, 1)
+                
+                texture_index = unpack('i', f)[0]      # TextureIndex
+                unknowns = unpack('i', f)[0] + unpack('i', f)[0]  # Unknown[2]
+                four = unpack('i', f)[0]               # Four
+                
+                # Create piece object
                 piece_object = Piece()
-                piece_object.name = "Piece %d" % piece_index
+                piece_object.name = f"Piece {piece_index}"
+                
+                # Try to get actual name from hash
+                looked_up_value = self._hasher.lookup_hash(hashed_piece_name, "pieces")
+                if looked_up_value is not None:
+                    piece_object.name = looked_up_value
+                    
                 piece_object.material_index = texture_index
-
-                print("Piece %d " % piece_index)
-
-                # For Each lod (Not really implemented like that right now..)
-                while finished_lods == False:
-
-                    peek_amount = 0
-
-                    # If they reached about 13kb of data
-                    # then check ahead to see if they have an unpack VIF command
-                    # that *usually* signifies there's more data.
-                    if check_for_more_data == True:
-                        print("Checking for more data...")
-
-                        # SizeOf(LODGlue)
-                        peek_amount += 28
-
-                        f.seek(peek_amount, 1)
-                        vif_cmd = VIFCommand()
-                        vif_cmd.read(f)
-
-                        # Okay move back to the start
-                        f.seek(-(peek_amount + 4), 1)
-
-                        # If it's not our magic info (Unpack Signal) then there's probably no more data here.
-                        if (vif_cmd.constant is not VIF_DIRECT or vif_cmd.code is not VIF_UNPACK):
-                            print("No more data found!")
-                            finished_lods = True
-                            break
-                        # End If
-
-                        print("Found an additional batch of data!")
-                        check_for_more_data = False
-                    # End If
-
-                    # LOD Glue 
-                    unknown_command = VIFCommand()
-                    # 4 Bytes
-                    unknown_command.read(f)
-
-                    # Skip unknown
-                    f.seek(4, 1)
-
-                    # This will either be a flush command, or 0
-                    flush_command = VIFCommand()
-                    # 4 Bytes
-                    flush_command.read(f)
-
-                    # Skip past 4 unknown ints
-                    f.seek(4 * 4, 1)
-
-                    # End LOD Glue
-
-                    # LOD
-                    unpack_command = VIFCommand()
-                    # 4 Bytes
-                    unpack_command.read(f)
-
-                    mesh_set_count = unpack('i', f)[0]
-                    mesh_data_count = unpack('i', f)[0]
-
-                    # Skip past two zeros
-                    f.seek(4 * 2, 1)
-
-                    # End LOD
-
-                    running_mesh_set_count = 0
-
-                    size_start = f.tell()
-
-                    # For Each MeshSet
-
-                    # FIXME: This should be correct but it seems to be missing some sets.
-                    # Oddly secure to just check for the unknown flag being 128. :thinking:
-                    #while running_mesh_set_count < mesh_set_count:
-                    while True:
-                        #print("Mesh Set %d" % mesh_set_index)
-                        #print("Running Count / Total : %d/%d" % (running_mesh_set_count, mesh_set_count) )
-                        data_count = int.from_bytes(unpack('c', f)[0], 'little')
-
-                        # Commonly 0, but occasionally 128. Rarely another value...
-                        unknown_flag = int.from_bytes(unpack('c', f)[0], 'little')
-
-                        #print("Data Count / Unknown Flag %d/%d" % (data_count, unknown_flag) )
-
-
-                        # Skip past the unknown short
-                        f.seek(2, 1)
-                        # Skip past 3 unknown floats (they're sometimes not int :thinking:)
-                        #print("Three Unknown Ints [%d/%d/%d]" % (unpack('I', f)[0],unpack('I', f)[0],unpack('I', f)[0]))
-                        #f.seek(4 * 3, 1)
-                        unknown_val_1 = unpack('I', f)[0]
-                        face_winding_order = unpack('I', f)[0]
-                        unknown_val_2 = unpack('I', f)[0]
-
-
-
-                        # Mesh Set
-                        triangle_counter = 0
-                        for i in range(data_count):
-                            #print("Data i/count", i, data_count)
-
-                            # TODO: Determine why there's sometimes just an empty line 
-                            # For now we must look for the vertex_padding. It seems to ALWAYS be 1.0f
+                piece_object.lods = []
+                
+                # Process each LOD for this piece
+                for lod_index in range(self._lod_count):
+                    print(f"Processing LOD {lod_index} for Piece {piece_index}")
+                    
+                    # Read mesh_type for this specific LOD
+                    mesh_type = unpack('i', f)[0]      # MeshType - moved to LOD level
+                    
+                    print(f"LOD {lod_index} Mesh Type: {mesh_type}")
+                    if mesh_type == MT_RIGID:
+                        print("Rigid Mesh")
+                    elif mesh_type == MT_SKELETAL:
+                        print("Skeletal Mesh")
+                    elif mesh_type == MT_VERTEX_ANIMATED:
+                        print("Vertex Animated Mesh")
+                    
+                    # Variables for processing mesh data
+                    lod = LOD()
+                    lod.mesh_type = mesh_type  # Store mesh type in the LOD
+                    vertex_list = VertexList()
+                    mesh_set_index = 1
+                    mesh_index = 0
+                    lod_skeletal_unk_sector_count = 0
+                    
+                    # Read SkeletalMeshData if this is a skeletal mesh
+                    if mesh_type == MT_SKELETAL:
+                        skel_unk = unpack('i', f)[0]  # SkelUnk
+                        lod_skeletal_unk_sector_count = unpack('i', f)[0]  # UnknownSectorSize
+                        print(f"Skeletal mesh with UnknownSectorSize: {lod_skeletal_unk_sector_count}")
+                    
+                    # Read GeometryBatchHeader
+                    lod_vertex_count = unpack('i', f)[0]       # VertexCount
+                    lod_node_binding = unpack('i', f)[0]  # target node index for ridgid or bone count for weighting in skeletal
+                    lod.node_binding = lod_node_binding  # Store it in the LOD object
+                    print(f"Geometry batch: {lod_vertex_count} vertices, {lod_node_binding} target node iondex/bone count")
+                    
+                    # Process LODs - potentially multiple batches
+                    check_for_more_data = False
+                    finished_lods = False
+                    
+                    # Process batch data for this LOD
+                    while not finished_lods:
+                        # Check if we need to look for more data
+                        if check_for_more_data:
+                            print("Checking for more data...")
                             
-                            # Skip past three zeros + one unknown large uint                        
-                            f.seek(4 * 3, 1)
-
-                            constant_one = unpack('f', f)[0]
-
-                            # If we have our constant, then we need to rewind back to the start
-                            if constant_one == 1.0:
-                                f.seek(-(4 * 4), 1)
-                            # else, we're already here!
-
-                            vertex = Vertex()
+                            # SizeOf(BatchConnector)
+                            peek_amount = 28
                             
-                            # There's no lods, so no need to keep track of this
-                            vertex.sublod_vertex_index = 0xCDCD
-
-                            vertex_data = self._read_vector(f)
-                            vertex_padding = unpack('f', f)[0]
-                            normal_data = self._read_vector(f)
-                            normal_padding = unpack('f', f)[0]
-
-                            uv_data = Vector()
-                            uv_data.x = unpack('f', f)[0]
-                            uv_data.y = unpack('f', f)[0]
-
-                            vertex_index = unpack('f', f)[0]
-                            unknown_padding = unpack('f', f)[0]
-
-                            # Create our FaceVert
-                            face_vertex = FaceVertex()
-                            face_vertex.texcoord = uv_data
-                            face_vertex.vertex_index = mesh_index
-
-                            # 0x412 and 0x8412
-                            # Here we check to see if it's 0x8412, 
-                            # and if it is our FaceBuilder2000 will reverse the winding order when building the face
-                            face_vertex.reversed = face_winding_order == WO_REVERSED
-
-                            vertex.location = vertex_data
-                            vertex.normal = normal_data
-
-                            # Local set list
-                            vertex_list.append(vertex, mesh_set_index, face_vertex, False)
-
-                            mesh_index += 1
-                        # End For `i in range(data_count)`
-
-                        mesh_set_index += 1
-                        running_mesh_set_count += 1
-
-                        # This is a total hack, but it works..
-                        if unknown_flag == 128:
-                            print("Breaking from loop!")
-                            break
-
-
-                    # End While `running_mesh_data_count < mesh_data_count`
-
-                    #####################################################################
-                    # HACK: Sometimes there's a 4*4 bytes row before the end command
-                    # So let's look for our end command, and if it's not found skip 4*4!
-                    end_command_peek = [ unpack('i', f)[0], unpack('i', f)[0], unpack('i', f)[0], unpack('i', f)[0] ]
-
-                    # Well if it is our end command, then go back into the past so we can properly grab it
-                    # otherwise we just skipped the junk!
-                    if end_command_peek[0] == 0 and end_command_peek[1] == 0 and end_command_peek[2] == 0 and end_command_peek[3] == VIF_MSCALF:
-                        print("Found End Command!")
-                        f.seek(-(4*4), 1)
-                    else:
-                        print("Skipped junk at the end!")
-
-                    #####################################################################
-
-                    # 0x15 = call micro program
-                    # This probably yells at the GS to read the last VIF packet
-                    end_command = EndCommand()
-                    # 4 Bytes
-                    end_command.read(f)
-
-                    print("End Command ", end_command.__dict__)
-
-                    size_end = f.tell()
-
-                    # MeshSet size in bytes
-                    size = size_end - size_start
-                    print("size (%d) = size_end (%d) - size_start (%d)" % (size, size_end, size_start))
-
-                    # If we're bigger than 13kb then check for additional data
-                    # 13kb seems to be about the limit per meshset batch. 
-                    if size > 13000:
-                        print("Batch was over 13kb, checking for more data, size: %d" % size)
-                        check_for_more_data = True
-                    else:
-                        print("No more data expected in this batch, size: %d" % size)
-                        finished_lods = True
-                        break
-                # End While `finished_lods == False`
-
-                # Fill up the LOD
-                lod.vertices += vertex_list.get_vertex_list()
-                vertex_list.generate_faces()
-                lod.faces += vertex_list.get_face_list()
-
-
-                if mesh_type is MT_SKELETAL:
-
-
-                    unk_sector_start = f.tell()
-                    unk_sector_finished = False
-                    while True:
-                        unk_amount_to_skip = unpack('H', f)[0]
-
-                        # This section stores a count and then various values (all in shorts)
-                        # So skip the count * 2 (length of a short in this case)
-                        f.seek(+(unk_amount_to_skip * 2), 1)
-
-                        # The current count in short.
-                        current_total = (f.tell() - unk_sector_start) / 2
-                        # Oh we're done?..nope. We need to skip some padding first!
-                        if current_total >= lod_skeletal_unk_sector_count:
-                            #print("(%d/%d) Finished!" % (current_total, lod_skeletal_unk_sector_count))
-                            # Okay, loop through and look for 1.0f 3*4 bytes away!
-                            while True:
-                                test_values = unpack('4f', f)
-                                #print("Testing 4th value %f at %d" % (test_values[3], f.tell()))
-
-                                if test_values[3] == 1.0:
-                                    unk_sector_finished = True
-                                    # Go back 4*4 bytes
-                                    f.seek(-4*4, 1)
-                                    break
+                            f.seek(peek_amount, 1)
+                            vif_cmd = VIFCommand()
+                            vif_cmd.read(f)
                             
-                                # Go back 14 bytes (We want to crawl up 2 bytes at a time)
-                                f.seek(-14, 1)
+                            # Move back
+                            f.seek(-(peek_amount + 4), 1)
+                            
+                            # Check if there's more data
+                            if vif_cmd.constant != VIF_DIRECT or vif_cmd.code != VIF_UNPACK:
+                                print("No more data found!")
+                                finished_lods = True
+                                break
+                                
+                            print("Found an additional batch of data!")
+                            check_for_more_data = False
                         
-                        if unk_sector_finished:
-                            break
-                                    
+                        # Read BatchConnector
+                        unknown_command = VIFCommand()
+                        unknown_command.read(f)
+                        
+                        # Skip unknown
+                        f.seek(4, 1)
+                        
+                        # Read flush command
+                        flush_command = VIFCommand()
+                        flush_command.read(f)
+                        
+                        # Skip unknowns
+                        f.seek(4 * 4, 1)
+                        
+                        # Read PS2VIFUnpack
+                        unpack_command = VIFCommand()
+                        unpack_command.read(f)
+                        
+                        mesh_set_count = unpack('i', f)[0]
+                        mesh_data_count = unpack('i', f)[0]
+                        
+                        # Skip zeros
+                        f.seek(4 * 2, 1)
+                        
+                        # Track size for batch size calculation
+                        size_start = f.tell()
+                        running_mesh_set_count = 0
+                        
+                        # Process MeshSets
+                        while True:
+                            # Read MeshSet header
+                            data_count = int.from_bytes(unpack('c', f)[0], 'little')
+                            unknown_flag = int.from_bytes(unpack('c', f)[0], 'little')
+                            
+                            # Skip padding
+                            f.seek(2, 1)
+                            
+                            # Read render patch details
+                            unknown_val_1 = unpack('I', f)[0]  # RenderPatchStart
+                            face_winding_order = unpack('I', f)[0]  # WindingOrder
+                            unknown_val_2 = unpack('I', f)[0]  # Unknown3
+                            
+                            # Process each vertex in this mesh set
+                            for i in range(data_count):
+                                # Check for 1.0f padding marker
+                                f.seek(4 * 3, 1)
+                                constant_one = unpack('f', f)[0]
+                                
+                                # If we found the marker, go back to read vertex data
+                                if constant_one == 1.0:
+                                    f.seek(-(4 * 4), 1)
+                                
+                                # Read vertex data
+                                vertex = Vertex()
+                                vertex.sublod_vertex_index = 0xCDCD
+                                
+                                vertex_data = self._read_vector(f)
+                                vertex_padding = unpack('f', f)[0]
+                                normal_data = self._read_vector(f)
+                                normal_padding = unpack('f', f)[0]
+                                
+                                uv_data = Vector()
+                                uv_data.x = unpack('f', f)[0]
+                                uv_data.y = unpack('f', f)[0]
+                                
+                                vertex_index = unpack('f', f)[0]
+                                unknown_padding = unpack('f', f)[0]
+                                
+                                # Create face vertex
+                                face_vertex = FaceVertex()
+                                face_vertex.texcoord = uv_data
+                                face_vertex.vertex_index = mesh_index
+                                face_vertex.reversed = face_winding_order == WO_REVERSED
+                                
+                                # Set vertex attributes
+                                vertex.location = vertex_data
+                                vertex.normal = normal_data
+                                
+                                # Add to vertex list
+                                vertex_list.append(vertex, mesh_set_index, face_vertex, False)
+                                
+                                mesh_index += 1
+                            
+                            mesh_set_index += 1
+                            running_mesh_set_count += 1
+                            
+                            # Exit loop if this was the last set (flagged with 0x80/128)
+                            if unknown_flag == 128:
+                                print("Found last mesh set (flag 128)")
+                                break
+                        
+                        
+                        # Check for extended data or end command
+                        end_command_peek = [unpack('i', f)[0], unpack('i', f)[0], unpack('i', f)[0], unpack('i', f)[0]]
+                        
+                        # If end command, go back to read it properly
+                        if end_command_peek[0] == 0 and end_command_peek[1] == 0 and end_command_peek[2] == 0 and end_command_peek[3] == VIF_MSCALF:
+                            print("Found End Command")
+                            f.seek(-(4*4), 1)
+                        else:
+                            print("Skipping extra data before end command")
+                        
+                        # Read end command
+                        end_command = EndCommand()
+                        end_command.read(f)
+                        
+                        # Calculate batch size
+                        size_end = f.tell()
+                        size = size_end - size_start
+                        print(f"Batch size: {size} bytes")
 
-                    #
-                    # Here we want to build a list of ordered vertices. 
-                    # After that will come the ordered weights
-                    # We can then do a double loop
-                    # that we can add the weights to the already processed verts
-                    #
-                    ordered_vertices = []
-
-                    class OrderedVertex(object):
-                        def __ini__(self):
+                        # Instead of using a fixed size threshold that immediately ends processing,
+                        # try to peek ahead to see if there's more data regardless of current batch size
+                        vif_peek_pos = f.tell()
+                        try:
+                            # Peek ahead (BatchConnector structure size is 28 bytes)
+                            peek_amount = 28
+                            f.seek(peek_amount, 1)
+                            
+                            # Try to read a VIF command
+                            vif_cmd = VIFCommand()
+                            vif_cmd.read(f)
+                            
+                            # Go back to our original position
+                            f.seek(vif_peek_pos)
+                            
+                            # Check if the peeked command looks like a valid VIF command for a new batch
+                            if vif_cmd.constant == VIF_DIRECT and vif_cmd.code == VIF_UNPACK:
+                                print(f"Found another batch following the current one (size: {size})")
+                                check_for_more_data = True
+                                finished_lods = False
+                            else:
+                                print(f"No more batches found after current batch (size: {size})")
+                                check_for_more_data = False
+                                finished_lods = True
+                        except Exception as e:
+                            # If an exception occurs during peeking (e.g., EOF), assume no more batches
+                            print(f"Exception occurred during peek: {e}")
+                            f.seek(vif_peek_pos)  # Make sure we're back at the right position
+                            check_for_more_data = False
+                            finished_lods = True
+                    
+                    # Process vertices and faces
+                    lod.vertices += vertex_list.get_vertex_list()
+                    vertex_list.generate_faces()
+                    lod.faces += vertex_list.get_face_list()
+                    
+                    # Process skeletal mesh weights if needed
+                    if mesh_type == MT_SKELETAL:
+                        # Process the UnknownSector
+                        unk_sector_start = f.tell()
+                        unk_sector_finished = False
+                        
+                        # Step through variable-length entries
+                        while True:
+                            unk_amount_to_skip = unpack('H', f)[0]
+                            f.seek(+(unk_amount_to_skip * 2), 1)
+                            
+                            current_total = (f.tell() - unk_sector_start) / 2
+                            if current_total >= lod_skeletal_unk_sector_count:
+                                # Look for 1.0f marker indicating start of vertex data
+                                while True:
+                                    test_values = unpack('4f', f)
+                                    if test_values[3] == 1.0:
+                                        unk_sector_finished = True
+                                        f.seek(-4*4, 1)
+                                        break
+                                    f.seek(-14, 1)
+                            
+                            if unk_sector_finished:
+                                break
+                        
+                        # Process ordered vertices
+                        ordered_vertices = []
+                        
+                        class OrderedVertex(object):
+                            def __init__(self):
                                 self.location = Vector()
                                 self.location_padding = 0
                                 self.normal = Vector()
                                 self.normal_padding = 1
-
-                    print("Before Ordered Vertex %d, vertex count: %d" % (f.tell(), lod_vertex_count))
-
-                    for vi in range(lod_vertex_count):
-                        ov = OrderedVertex()
-                        ov.location = self._read_vector(f)
-                        ov.location_padding = unpack('f', f)[0]
-                        ov.normal = self._read_vector(f)
-                        ov.normal_padding = unpack('f', f)[0]
-                        ordered_vertices.append(ov)
-                    # End for `vi in range(lod_vertex_count)`
-
-                    # Ok we need to go through and figure out which bones map to which index
-                    node_map = []
-
-                    print("Currently at %d" % f.tell())
-
-                    # Go through and capture every int
-                    # These are the node indexes
-                    for wni in range(lod_weighted_nodes_count):
-                        node_map.append(unpack('i', f)[0])
-
-                    print("Node map: ", node_map)
-                    
-                    for wi in range(lod_vertex_count):
-                        weights = unpack('4h', f)
-                        node_indexes = unpack('4b', f)
-
-                        #print("WEIGHTS     :",wi, weights)
-                        #print("NODE INDEXES: ",wi, node_indexes)
                         
-                        normalized_weights = []
-
-                        # Normlize our weights from 0..4096 to 0..1
-                        for weight in weights:
-                            if weight == 0:
-                                continue
-
-                            normalized_weights.append( float(weight) / 4096.0 )
-                            #print (normalized_weights)
-
-                        processed_weights = []
-
-                        for j in range( len(normalized_weights) ):
-                            weight = Weight()
-                            # Set the normalized weight bias
-                            weight.bias = normalized_weights[j]
-                            weight.node_index = node_indexes[j]
-
-                            if weight.node_index != 0:
-                                weight.node_index /= 4
-                                weight.node_index = int(weight.node_index)
-
-                            # Find the proper node!
-                            weight.node_index = node_map[weight.node_index]
+                        print(f"Reading {lod_vertex_count} ordered vertices at position {f.tell()}")
+                        
+                        for vi in range(lod_vertex_count):
+                            ov = OrderedVertex()
+                            ov.location = self._read_vector(f)
+                            ov.location_padding = unpack('f', f)[0]
+                            ov.normal = self._read_vector(f)
+                            ov.normal_padding = unpack('f', f)[0]
+                            ordered_vertices.append(ov)
+                        
+                        # Read node map
+                        node_map = []
+                        print(f"Reading {lod_node_binding} node map entries at position {f.tell()}")
+                        
+                        for wni in range(lod_node_binding):
+                            node_map.append(unpack('i', f)[0])
+                        
+                        print(f"Node map: {node_map}")
+                        
+                        # Read and process vertex weights
+                        for wi in range(lod_vertex_count):
+                            weights = unpack('4h', f)
+                            # This line has the wrong variable name
+                            node_indices = unpack('4b', f)  # Changed from node_indexes to node_indices
                             
-                            processed_weights.append(weight)
-
-                        ordered_vertex = ordered_vertices[wi]
-
-                        for vi in range( len(lod.vertices) ):
-                            vertex = lod.vertices[vi]
-
-                            if ordered_vertex.location == vertex.location:
-                                lod.vertices[vi].weights = copy.copy(processed_weights)
-
-                                for i in range(len(lod.vertices[vi].weights)):
-                                    lod.vertices[vi].weights[i].location = (ordered_vertex.location @ Matrix())
-
-                                #print("Setting vertex weights ! ", lod.vertices[vi].weights[0].__dict__, processed_weights[0].__dict__)
-                                break
-                        # End for `vi in range( len(lod.vertices) )`
-                    # End for `wi in range(lod_vertex_count)`
-                # End for Skeletal Mesh
-
-                # Add the LOD to the piece
-                piece_object.lods = [lod]
-
-                # Add the piece to the model!
-                model.pieces.append(piece_object) 
-
-                print("Final verticies ", len(lod.vertices))
-                print("Final faces ", len(lod.faces))
-            # End For `piece_index in range( piece_count )`
-
-            # Handle Nodes!
+                            normalized_weights = []
+                            
+                            # Normalize weights
+                            for weight in weights:
+                                if weight == 0:
+                                    continue
+                                normalized_weights.append(float(weight) / 4096.0)
+                            
+                            processed_weights = []
+                            
+                            # Process node indices
+                            for j in range(len(normalized_weights)):
+                                weight = Weight()
+                                weight.bias = normalized_weights[j]
+                                weight.node_index = node_indices[j]  # Changed from node_indexes to node_indices
+                                
+                                if weight.node_index != 0:
+                                    weight.node_index /= 4
+                                    weight.node_index = int(weight.node_index)
+                                
+                                # Map to global node index
+                                weight.node_index = node_map[weight.node_index]
+                                processed_weights.append(weight)
+                            
+                            # Match weights to vertices by position
+                            ordered_vertex = ordered_vertices[wi]
+                            
+                            for vi in range(len(lod.vertices)):
+                                vertex = lod.vertices[vi]
+                                
+                                if ordered_vertex.location == vertex.location:
+                                    lod.vertices[vi].weights = copy.copy(processed_weights)
+                                    # Set weight locations
+                                    for i in range(len(lod.vertices[vi].weights)):
+                                        lod.vertices[vi].weights[i].location = (ordered_vertex.location @ Matrix())
+                                    
+                                    break
+                    
+                    # Add the LOD to the piece
+                    piece_object.lods.append(lod)
+                    
+                    print(f"LOD {lod_index} Final vertices: {len(lod.vertices)}")
+                    print(f"LOD {lod_index} Final faces: {len(lod.faces)}")
+                
+                
+                 # AFTER the LOD loop, set piece-level mesh type from first LOD
+                if piece_object.lods:
+                    piece_object.mesh_type = piece_object.lods[0].mesh_type  # ADD THIS LINE
+                    print(f"Set piece mesh type to: {piece_object.mesh_type}")  # ADD THIS LINE
+                
+                # Add the piece to the model
+                model.pieces.append(piece_object)
+                
+                print(f"Added Piece {piece_index} with {len(piece_object.lods)} LODs")
+        
+            # Read Nodes section
             f.seek(node_offset)
-
             model.nodes = [self._read_node(f) for _ in range(self._node_count)]
             build_undirected_tree(model.nodes)
+            
+            # Apply positioning system after all pieces and nodes are loaded
+            self._apply_piece_attachments(model)
+            
+            # Read WeightSet data (follows node data)
+            try:
+                weight_set_count = unpack('I', f)[0]
+                print(f"Found {weight_set_count} weight sets")
+    
+                if 0 <= weight_set_count < 1000:  # Reasonable sanity check
+                    weight_sets = []
+                    for i in range(weight_set_count):
+                        try:
+                            # Read the ID
+                            weight_set_id = unpack('I', f)[0]
+                            # Read node count
+                            node_count = unpack('I', f)[0]
+                            # Read weights
+                            node_weights = []
+                            for j in range(node_count):
+                                node_weights.append(unpack('f', f)[0])
+                
+                            # Create and add the weight set
+                            weight_set = WeightSet()
+                            weight_set.id = weight_set_id
+                            weight_set.node_weights = node_weights
+                            weight_sets.append(weight_set)
+                        except Exception as e:
+                            print(f"Error reading weight set {i+1}/{weight_set_count}: {e}")
+                            break
+                    print(f"Successfully read {len(weight_sets)} weight sets")
+                else:
+                    print(f"Skipping weight sets: count {weight_set_count} seems invalid")
+            except Exception as e:
+                print(f"Error reading weight sets section: {e}")
+ 
+            # Then for child models, subtract 1 from the count for character models
+            try:
+                f.seek(child_model_offset)
+                child_model_count = unpack('I', f)[0]
+    
+                # Subtract 1 from child model count for character models
+                if child_model_count > 0:
+                    actual_child_model_count = child_model_count - 1
+                    print(f"Character model: adjusting child model count from {child_model_count} to {actual_child_model_count}")
+                else:
+                    actual_child_model_count = child_model_count
+    
+                model.child_models = []
+                for i in range(actual_child_model_count):
+                    model.child_models.append(self._read_child_model(f))
+        
+            except Exception as e:
+                print(f"Error reading child models: {e}")
+                model.child_models = []
 
-            # Handle Animations!
-            f.seek(animation_offset)
-            local_animation_count = unpack('I', f)[0]
-            model.animations = [self._read_animation(f) for _ in range(local_animation_count)]
+            # Read Animations
+            try:
+                f.seek(animation_offset)
+                local_animation_count = unpack('I', f)[0]
+                if local_animation_count > 0 and local_animation_count < 1000:  # Sanity check
+                    model.animations = [self._read_animation(f) for _ in range(local_animation_count)]
+                else:
+                    print(f"Skipping animations: count {local_animation_count} seems invalid")
+            except Exception as e:
+                print(f"Error reading animations: {e}")
+                model.animations = []
 
-            # Handle Sockets!
-            f.seek(socket_offset)
-            model.sockets = [self._read_socket(f) for _ in range(socket_count)]
-
+            # Read Sockets
+            try:
+                f.seek(socket_offset)
+                if socket_count > 0 and socket_count < 50:  # Sanity check
+                    model.sockets = [self._read_socket(f) for _ in range(socket_count)]
+                else:
+                    print(f"Skipping sockets: count {socket_count} seems invalid")
+            except Exception as e:
+                print(f"Error reading sockets: {e}")
+                model.sockets = []
+            
         return model
