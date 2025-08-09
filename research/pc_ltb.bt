@@ -284,6 +284,47 @@ struct Piece {
         } // Matrix Palette
 
     }
+    else if (PieceType == VertexAnimatedMesh)
+    {
+        int unk;
+        int DataType[4];
+        int unk;
+        int unk;
+
+        // per DataType
+        for (i = 0; i < 4; i++) {
+            // Per Vert
+            for (j = 0; j < VertCount; j++) {
+                if (DataType[i] & VTX_Position) {
+                    LTVector Position;
+                }
+                if (DataType[i] & VTX_Normal) {
+                    LTVector Normal;
+                }
+                if (DataType[i] & VTX_Colour) {
+                    int RGBA;
+                }
+                if (DataType[i] & VTX_UV_Sets_1) {
+                    LTUV uv_1;
+                }
+                if (DataType[i] & VTX_UV_Sets_2) {
+                    LTUV uv_2;
+                }
+                if (DataType[i] & VTX_UV_Sets_3) {
+                    LTUV uv_3;
+                }
+                if (DataType[i] & VTX_UV_Sets_4) {
+                    LTUV uv_4;
+                }
+                if (DataType[i] & VTX_BasisVector) {
+                    LTVector S;
+                    LTVector T;
+                }
+            } // End Per Vert
+        } // End Per DataType
+        ushort IndexList[VertCount];
+        int unk;
+    }
     
 };
 
@@ -347,6 +388,14 @@ struct AnimTransform (int CompressionType, int KeyFrameCount) {
             // Transform
             LTVector Translations[KeyFrameCount];
             LTQuat Rotations[KeyFrameCount];
+        }
+        else
+        {
+            struct VertexKeyframe
+            {
+                int VertCount;
+                float VertexData[VertCount * 3];
+            } VertexKeyframes[KeyFrameCount];
         }
     }
     else if (CompressionType == CMP_Relevant) {
