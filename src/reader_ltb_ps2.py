@@ -959,10 +959,13 @@ class PS2LTBModelReader(object):
                             print(f"Error reading weight set {i+1}/{weight_set_count}: {e}")
                             break
                     print(f"Successfully read {len(weight_sets)} weight sets")
+                    model.weight_sets = weight_sets
                 else:
                     print(f"Skipping weight sets: count {weight_set_count} seems invalid")
+                    model.weight_sets = []
             except Exception as e:
                 print(f"Error reading weight sets section: {e}")
+                model.weight_sets = []
  
             # Then for child models, subtract 1 from the count for character models
             try:
