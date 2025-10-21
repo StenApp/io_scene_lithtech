@@ -83,21 +83,23 @@ class ABCV6ModelWriter(object):
             for lod in piece.lods:
                 buffer.extend(struct.pack('I', model.face_count))
                 for face in lod.faces:
-                    buffer.extend(struct.pack('2f', face.vertices[0].texcoord.x, face.vertices[0].texcoord.y))
-                    buffer.extend(struct.pack('2f', face.vertices[1].texcoord.x, face.vertices[1].texcoord.y))
+                     # face.vertices[0], face.vertices[2] = face.vertices[2], face.vertices[0]
                     buffer.extend(struct.pack('2f', face.vertices[2].texcoord.x, face.vertices[2].texcoord.y))
-                    buffer.extend(struct.pack('3H', face.vertices[0].vertex_index, face.vertices[1].vertex_index, face.vertices[2].vertex_index))
+                    buffer.extend(struct.pack('2f', face.vertices[1].texcoord.x, face.vertices[1].texcoord.y))
+                    buffer.extend(struct.pack('2f', face.vertices[0].texcoord.x, face.vertices[0].texcoord.y))
+                    buffer.extend(struct.pack('3H', face.vertices[2].vertex_index, face.vertices[1].vertex_index, face.vertices[0].vertex_index))
                     normal = face.normal.normalized() * 127
-                    buffer.extend(struct.pack('3b', int(normal.x), int(-normal.y), int(normal.z)))
+                    buffer.extend(struct.pack('3b', int(normal.x), int(normal.y), int(normal.z)))
 
                 buffer.extend(struct.pack('I', model.vertex_count))
                 buffer.extend(struct.pack('I', len(lod.vertices))) # lod[0].vert_count
                 for vertex in lod.vertices:
                     buffer.extend(self._vector_to_bytes(vertex.weights[0].location))
                     normal = vertex.normal.normalized() * 127
-                    buffer.extend(struct.pack('3b', int(normal.x), int(-normal.y), int(normal.z)))
+                    buffer.extend(struct.pack('3b', int(normal.x), int(normal.y), int(normal.z)))
                     buffer.extend(struct.pack('B', vertex.weights[0].node_index)) # TODO: error out on more than a single weight?
                     buffer.extend(struct.pack('2H', 0, 0)) # TODO: lod related, I think?
+                    print("Written normal:", int(normal.x), int(normal.y), int(normal.z)) # normals debug
 
         sections.append(Section('Geometry', bytes(buffer)))
 

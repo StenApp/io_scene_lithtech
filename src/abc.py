@@ -105,6 +105,9 @@ class LOD(object):
     def get_face_vertices(self, face_index):
         return [self.vertices[vertex.vertex_index] for vertex in self.faces[face_index].vertices]
 
+    def get_normals(self):
+        return [vertex.normal for vertex in self.vertices]
+
 
 class Piece(object):
 

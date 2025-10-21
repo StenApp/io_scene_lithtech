@@ -58,9 +58,16 @@ class ABCV6ModelReader(object):
 
         vertex_normal_chars = unpack('3b', f)
 
-        vertex.normal.x = vertex_normal_chars[0]
-        vertex.normal.y = vertex_normal_chars[1]
-        vertex.normal.z = vertex_normal_chars[2]
+        vertex.normal.x = (vertex_normal_chars[0] / 127.0)
+        vertex.normal.y = (vertex_normal_chars[1] / 127.0)
+        vertex.normal.z = (vertex_normal_chars[2] / 127.0)
+
+        # Convert to mathutils.Vector for easier normalization
+        normal_vector = vertex.normal
+
+        # Normalize the normal using mathutils
+        vertex.normal = normal_vector.normalized()
+        print("Read normal:", vertex.normal.x * 127, vertex.normal.y * 127, vertex.normal.z * 127)
 
         weight = Weight()
 
@@ -79,13 +86,13 @@ class ABCV6ModelReader(object):
     def _read_face_vertex(self, f):
         face_vertex_list = [FaceVertex(), FaceVertex(), FaceVertex()]
 
-        face_vertex_list[0].texcoord.xy = unpack('2f', f)
-        face_vertex_list[1].texcoord.xy = unpack('2f', f)
         face_vertex_list[2].texcoord.xy = unpack('2f', f)
+        face_vertex_list[1].texcoord.xy = unpack('2f', f)
+        face_vertex_list[0].texcoord.xy = unpack('2f', f)
 
-        face_vertex_list[0].vertex_index = unpack('H', f)[0]
-        face_vertex_list[1].vertex_index = unpack('H', f)[0]
         face_vertex_list[2].vertex_index = unpack('H', f)[0]
+        face_vertex_list[1].vertex_index = unpack('H', f)[0]
+        face_vertex_list[0].vertex_index = unpack('H', f)[0]
 
         # Jake: Not needed?
         face_normal = unpack('3b', f)
@@ -124,6 +131,7 @@ class ABCV6ModelReader(object):
 
             lod.faces = copy.deepcopy(main_lod.faces)
             lod.vertices = [self._read_vertex(f) for _ in range(count)]
+            lod.normals = [vertex.normal for vertex in lod.vertices]
 
             lod_list.append(lod)
         # End For
@@ -333,6 +341,7 @@ class ABCV6ModelReader(object):
                     self._model.flip_anim = flip_anim
         # End
 
+        '''OLD bind matrix stuff, this was breaking normal. Fix later maybe?
         # Okay we're going to use the first animation's location and rotation data for our node's bind_matrix
         for node_index in range(len(self._model.nodes)):
             node = self._model.nodes[node_index]
@@ -357,7 +366,7 @@ class ABCV6ModelReader(object):
             # Apply it!
             node.bind_matrix = parent_matrix @ mat
             node.inverse_bind_matrix = node.bind_matrix.inverted()
-        # End
+        # End'''
 
         # Ok now we're going to apply out mesh offset
         vert_index = 0
@@ -379,7 +388,7 @@ class ABCV6ModelReader(object):
                 vert.location = self._model.nodes[node_index].bind_matrix @ vert.location
             # End
 
-            vert.normal = self._model.nodes[node_index].bind_matrix @ vert.normal
+            #vert.normal = self._model.nodes[node_index].bind_matrix @ vert.normal
             vert_index += 1
         # End
 

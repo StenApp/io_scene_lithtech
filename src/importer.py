@@ -299,6 +299,17 @@ def import_model(model, options):
                     bm.to_mesh(mesh)
                     bm.free()
 
+                    # Check if LOD normals are found
+                    if len(lod.get_normals()):
+                        custom_normals = lod.get_normals()
+
+                    else:
+                        # Fallback to Blender's smooth normals if no LOD normals are found
+                        custom_normals = mesh.calculate_smooth_normals()
+
+                    # Set the normals (either custom or smooth)
+                    mesh.normals_split_custom_set_from_vertices(custom_normals)
+
                     # Assign texture coordinates
                     try:
                         material_face_offsets = [0] * len(mesh.materials)
@@ -331,30 +342,30 @@ def import_model(model, options):
                     except Exception as e:
                         print(f"Error assigning texture coordinates: {e}")
 
-                    # Assign normals
-                    try:
-                        face_offset = 0
-                        polygons = mesh.polygons[face_offset:face_offset + len(lod.faces)]
-                        for face_index, (face, polygon) in enumerate(zip(lod.faces, polygons)):
-                            try:
-                                vertices = [lod.vertices[fv.vertex_index] for fv in face.vertices]
-                                for vertex, loop_index in zip(vertices, polygon.loop_indices):
-                                    # Ensure valid normal vector
-                                    if vertex.normal.length > 0:
-                                        n = Vector(vertex.normal)
-                                        mesh.loops[loop_index].normal = n
-                                    else:
-                                        # Use a default up vector if normal is invalid
-                                        mesh.loops[loop_index].normal = Vector((0, 0, 1))
-                            except Exception as e:
-                                print(f"Error assigning normal for face {face_index}: {e}")
+                    # # Assign normals
+                    # try:
+                        # face_offset = 0
+                        # polygons = mesh.polygons[face_offset:face_offset + len(lod.faces)]
+                        # for face_index, (face, polygon) in enumerate(zip(lod.faces, polygons)):
+                            # try:
+                                # vertices = [lod.vertices[fv.vertex_index] for fv in face.vertices]
+                                # for vertex, loop_index in zip(vertices, polygon.loop_indices):
+                                    # # Ensure valid normal vector
+                                    # if vertex.normal.length > 0:
+                                        # n = Vector(vertex.normal)
+                                        # mesh.loops[loop_index].normal = n
+                                    # else:
+                                        # # Use a default up vector if normal is invalid
+                                        # mesh.loops[loop_index].normal = Vector((0, 0, 1))
+                            # except Exception as e:
+                                # print(f"Error assigning normal for face {face_index}: {e}")
                                 
-                        face_offset += len(lod.faces)
-                    except Exception as e:
-                        print(f"Error assigning normals: {e}")
+                        # face_offset += len(lod.faces)
+                    # except Exception as e:
+                        # print(f"Error assigning normals: {e}")
 
-                    mesh.validate(clean_customdata=False)
-                    mesh.update(calc_edges=False)
+                    # mesh.validate(clean_customdata=False)
+                    # mesh.update(calc_edges=False)
 
                     # add it to our collection c:
                     collection.objects.link(mesh_object)
@@ -518,8 +529,7 @@ def import_model(model, options):
                                 '''
                                 Func End
                                 '''
-                                if not (index == 1 and keyframe_index == 0): # this is a dumb hack to preserve the neutral pose
-                                    recursively_apply_transform(model.nodes, 0, armature_object.pose.bones, None)
+                                recursively_apply_transform(model.nodes, 0, armature_object.pose.bones, None)
 
                                 # For every bone
                                 for bone, node in zip(armature_object.pose.bones, model.nodes):
