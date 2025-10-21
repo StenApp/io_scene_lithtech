@@ -35,6 +35,11 @@ class ModelImportOptions(object):
 
 def import_model(model, options):
     try:
+        #delete all old actions (animation player)
+        if options.should_import_animations:
+            for action in list(bpy.data.actions):
+                bpy.data.actions.remove(action)
+                
         # utils.delete_all_objects()
 
         # Validate model before proceeding
@@ -575,7 +580,7 @@ def import_model(model, options):
 
         # Apply coordinate system transformations
         armature_object.rotation_euler.x = math.radians(90)
-        armature_object.scale.x = -1.0
+        #armature_object.scale.x = -1.0
 
         # Apply the geometry flip in armature space
         # This may not be the best place to do it, but it works for now!
@@ -629,7 +634,7 @@ class ImportOperatorABC(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
     should_import_animations: BoolProperty(
         name="Import Animations (Experimental)",
         description="When checked, animations will be imported as actions.",
-        default=False,
+        default=True,
     )
 
     should_import_vertex_animations: BoolProperty(

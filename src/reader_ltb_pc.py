@@ -519,6 +519,14 @@ class PCLTBModelReader(object):
     def from_file(self, path):
         model = Model()
         model.name = os.path.splitext(os.path.basename(path))[0]
+        
+        filename = os.path.basename(path)
+    
+        print(f"\n{'='*60}")
+        print(f"LOADING MODEL: {filename}")
+        print(f"Format: LithTech LTB (PC)")
+        print(f"{'='*60}\n")
+        
         with open(path, 'rb') as f:
 
             #
@@ -527,11 +535,11 @@ class PCLTBModelReader(object):
             file_type = unpack('H', f)[0]
             file_version = unpack('H', f)[0]
 
-            if file_type is not 1:
+            if file_type != 1:
                 raise Exception('Unsupported File Type! Only mesh LTB files are supported.')
             # End If
 
-            if file_version is not 9:
+            if file_version != 9:
                 raise Exception('Unsupported File Version! Importer currently only supports v9.')
             # End If
 

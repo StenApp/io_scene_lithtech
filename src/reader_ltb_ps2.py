@@ -496,8 +496,11 @@ class PS2LTBModelReader(object):
         #model.name = os.path.splitext(os.path.basename(path))[0]
         filename = os.path.basename(path)
         model.name = os.path.splitext(filename)[0]
-    
-        print(f"=== Opening PS2 LTB file: {filename} ===")
+        
+        print(f"\n{'='*60}")
+        print(f"LOADING MODEL: {filename}")
+        print(f"Format: LithTech LTB (PS2)")
+        print(f"{'='*60}\n")
 
         with open(path, 'rb') as f:
             # Header section
@@ -509,8 +512,6 @@ class PS2LTBModelReader(object):
             reserved3 = unpack('i', f)[0]  # Reserved3
             reserved4 = unpack('i', f)[0]  # Reserved4
             
-            print("-------------------------------")
-            print("LithTech LTB (PS2) Model Reader")
             print("Loading ltb version %d" % self._version)
 
             # Verify file type and version

@@ -26,6 +26,7 @@ if 'bpy' in locals():
     if 'importer'           in locals(): importlib.reload(importer)
     if 'exporter'           in locals(): importlib.reload(exporter)
     if 'converter'          in locals(): importlib.reload(converter)
+    if 'animation_ui'       in locals(): importlib.reload(animation_ui)
 
 import bpy
 from . import hash_ps2
@@ -40,6 +41,7 @@ from . import writer_lta_pc
 from . import importer
 from . import exporter
 from . import converter
+from . import animation_ui
 
 
 from bpy.utils import register_class, unregister_class
@@ -56,6 +58,9 @@ classes = (
 def register():
     for cls in classes:
         register_class(cls)
+        
+    # Animation UI
+    animation_ui.register()    
 
     # Import options
     bpy.types.TOPBAR_MT_file_import.append(importer.ImportOperatorABC.menu_func_import)
@@ -73,6 +78,9 @@ def register():
 def unregister():
     for cls in reversed(classes):
         unregister_class(cls)
+        
+    # Animation UI
+    animation_ui.unregister()    
 
     # Import options
     bpy.types.TOPBAR_MT_file_import.remove(importer.ImportOperatorABC.menu_func_import)

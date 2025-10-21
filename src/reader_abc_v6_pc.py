@@ -267,6 +267,14 @@ class ABCV6ModelReader(object):
     def from_file(self, path):
         self._model = Model()
         self._model.name = os.path.splitext(os.path.basename(path))[0]
+        
+        filename = os.path.basename(path)
+    
+        print(f"\n{'='*60}")
+        print(f"LOADING MODEL: {filename}")
+        print(f"Format: Lithtech ABC v6 (PC)")
+        print(f"{'='*60}\n")
+        
         with open(path, 'rb') as f:
             next_section_offset = 0
             while next_section_offset != -1:
