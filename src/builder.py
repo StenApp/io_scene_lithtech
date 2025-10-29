@@ -88,49 +88,164 @@ class ModelBuilder(object):
             # Access the loop normals
             loop_normals = [loop.normal for loop in mesh.loops]
 
+            # Remove the 90° X display rotation that was added by importer
+            armature_display_rotation_inverse = Matrix.Rotation(radians(-90), 4, 'X')
+            
             for vertex_index, vertex in enumerate(mesh.vertices):
-                weights = []
-                for vertex_group in mesh_object.vertex_groups:
-
-                    # Location is used in Lithtech 2.0 games, but is not in ModelEdit.
-                    try:
-                        bias = vertex_group.weight(vertex_index)
-                        bone = vertex_group_nodes[vertex_group]
-
-                        bone_matrix = armature_object.matrix_world @ bone.matrix_local
-
-                        location = (vertex.co @ mesh_object.matrix_world) @ bone_matrix.transposed().inverted()
-                        if bias != 0.0 and bone is not None:
-                            weight = Weight()
-                            weight.node_index = bone_indices[bone]
-                            weight.bias = bias
-                            weight.location = location
-                            weights.append(weight)
-                    except RuntimeError:
-                        pass
-
-
-                # Note: This corrects any rotation done on import
-                rot = Matrix.Rotation(radians(-180), 4, 'Z') @ Matrix.Rotation(radians(90), 4, 'X')
-
+                # ===== 1. ERST Vertex erstellen! =====
                 v = Vertex()
-                v.location = vertex.co @ rot
+                v.location = vertex.co  # Keine Transformation!
                 
-                # Replace vertex.normal with the average loop normal for this vertex
-
-
-
+                # ===== 2. DANN Weights sammeln =====
+                weights = []
+                
+                # Versuche gespeicherte weight.location zu verwenden
+                if "abc_weight_data" in mesh_object:
+                    try:
+                        vertex_weight_data = mesh_object["abc_weight_data"][vertex_index]
+                        # Lese in 5er-Chunks: [node_index, loc.x, loc.y, loc.z, bias]
+                        for i in range(0, len(vertex_weight_data), 5):
+                            if i + 4 < len(vertex_weight_data):
+                                weight = Weight()
+                                weight.node_index = int(vertex_weight_data[i])
+                                weight.location = Vector((
+                                    vertex_weight_data[i + 1],
+                                    vertex_weight_data[i + 2],
+                                    vertex_weight_data[i + 3]
+                                ))
+                                weight.bias = vertex_weight_data[i + 4]
+                                weights.append(weight)
+                    except (IndexError, KeyError, TypeError) as e:
+                        print(f"Warning: Could not load stored weight data for vertex {vertex_index}: {e}")
+                
+                # Fallback: Berechne weights neu wenn keine gespeicherten Daten
+                if not weights:
+                    for vertex_group in mesh_object.vertex_groups:
+                        try:
+                            bias = vertex_group.weight(vertex_index)
+                            bone = vertex_group_nodes[vertex_group]
+                            
+                            if bias != 0.0 and bone is not None:
+                                # Berechne weight.location: vertex -> bone local space
+                                bone_matrix = bone.matrix_local
+                                location = vertex.co @ bone_matrix.inverted()
+                                
+                                weight = Weight()
+                                weight.node_index = bone_indices[bone]
+                                weight.bias = bias
+                                weight.location = location
+                                weights.append(weight)
+                        except RuntimeError:
+                            pass
+                
+                # ===== 3. Weights zu Vertex hinzufügen =====
+                v.weights.extend(weights)
+                
+                # ===== 4. Normal berechnen =====
                 vertex_loop_normals = [
                     loop_normals[loop_index]
                     for loop_index in range(len(mesh.loops))
                     if mesh.loops[loop_index].vertex_index == vertex_index
                 ]
-
-
-                v.normal = sum(vertex_loop_normals, Vector()) / len(vertex_loop_normals) if vertex_loop_normals else vertex.norma
                 
-                v.weights.extend(weights)
+                v.normal = sum(vertex_loop_normals, Vector()) / len(vertex_loop_normals) if vertex_loop_normals else vertex.normal
+                
+                # ===== 5. Vertex zur LOD hinzufügen =====
                 lod.vertices.append(v)
+
+            # for vertex_index, vertex in enumerate(mesh.vertices):
+                # weights = []
+                # for vertex_group in mesh_object.vertex_groups:
+
+                    # # Location is used in Lithtech 2.0 games, but is not in ModelEdit.
+                    # try:
+                        # bias = vertex_group.weight(vertex_index)
+                        # bone = vertex_group_nodes[vertex_group]
+
+                        # #bone_matrix = armature_display_rotation_inverse @ (armature_object.matrix_world @ bone.matrix_local)
+                        # bone_matrix = bone.matrix_local
+                        
+                        # location = (vertex.co @ mesh_object.matrix_world) @ bone_matrix.inverted()
+                        
+                        # if bias != 0.0 and bone is not None:
+                            # weight = Weight()
+                            # weight.node_index = bone_indices[bone]
+                            # weight.bias = bias
+                            # weight.location = location
+                            # weights.append(weight)
+                    # except RuntimeError:
+                        # pass
+            
+            # # for vertex_index, vertex in enumerate(mesh.vertices):
+                # # weights = []
+                
+                # # # CRITICAL FIX: Use original weight.location from import if available!
+                # # if "abc_weight_data" in mesh_object:
+                    # # try:
+                        # # vertex_weight_data = mesh_object["abc_weight_data"][vertex_index]
+                        
+                        # # # Data is stored as flat list: [node_index, loc.x, loc.y, loc.z, bias, ...]
+                        # # # Read in chunks of 5 values
+                        # # for i in range(0, len(vertex_weight_data), 5):
+                            # # if i + 4 < len(vertex_weight_data):
+                                # # weight = Weight()
+                                # # weight.node_index = int(vertex_weight_data[i])
+                                # # weight.location = Vector((
+                                    # # vertex_weight_data[i + 1],
+                                    # # vertex_weight_data[i + 2],
+                                    # # vertex_weight_data[i + 3]
+                                # # ))
+                                # # weight.bias = vertex_weight_data[i + 4]
+                                # # weights.append(weight)
+                    # # except (IndexError, KeyError, TypeError) as e:
+                        # # print(f"Warning: Could not load stored weight data for vertex {vertex_index}, recalculating: {e}")
+                        # # # Fall through to calculation below
+                
+                # # # Fallback: Calculate weight.location if no stored data
+                # # if not weights:
+                    # # for vertex_group in mesh_object.vertex_groups:
+                        # # try:
+                            # # bias = vertex_group.weight(vertex_index)
+                            # # bone = vertex_group_nodes[vertex_group]
+                            
+                            # # if bias != 0.0 and bone is not None:
+                                # # # Use bone.matrix_local directly
+                                # # bone_matrix = bone.matrix_local
+                                # # location = vertex.co @ bone_matrix.inverted()
+                                
+                                # # weight = Weight()
+                                # # weight.node_index = bone_indices[bone]
+                                # # weight.bias = bias
+                                # # weight.location = location
+                                # # weights.append(weight)
+                        # # except RuntimeError:
+                            # # pass
+                
+                # # v.weights.extend(weights)
+            
+
+                # # # Note: This corrects any rotation done on import
+                # # rot = Matrix.Rotation(radians(-180), 4, 'Z') @ Matrix.Rotation(radians(90), 4, 'X')
+
+                # # v = Vertex()
+                # # #v.location = vertex.co @ rot
+                # # v.location = vertex.co
+                
+                # # # Replace vertex.normal with the average loop normal for this vertex
+
+
+
+                # # vertex_loop_normals = [
+                    # # loop_normals[loop_index]
+                    # # for loop_index in range(len(mesh.loops))
+                    # # if mesh.loops[loop_index].vertex_index == vertex_index
+                # # ]
+
+
+                # # v.normal = sum(vertex_loop_normals, Vector()) / len(vertex_loop_normals) if vertex_loop_normals else vertex.normal
+                
+                # # v.weights.extend(weights)
+                # # lod.vertices.append(v)
 
             ''' Faces '''
             material_count = {}
@@ -164,6 +279,9 @@ class ModelBuilder(object):
             model.pieces.append(piece)
 
         ''' Nodes '''
+        # Remove the 90° X display rotation that was added by importer
+        armature_display_rotation_inverse = Matrix.Rotation(radians(-90), 4, 'X')
+        
         for bone_index, bone in enumerate(armature.bones):
             node = Node()
             node.name = bone.name
@@ -172,9 +290,10 @@ class ModelBuilder(object):
             if bone_index == 0:  # DEBUG: set removable?
                 node.is_removable = True
 
+            #matrix = armature_display_rotation_inverse @ (armature_object.matrix_world @ bone.matrix_local)
             matrix = armature_object.matrix_world @ bone.matrix_local
 
-            node.bind_matrix = matrix
+            node.bind_matrix = bone.matrix_local
 
             # ABC v6 specific
             # FIXME: disgusting, can this be done better?
@@ -186,7 +305,9 @@ class ModelBuilder(object):
 
                         if vertex.weights[0].node_index == bone_index:
                             node.bounds_min = Vector((min(node.bounds_min.x, vertex.location.x), min(node.bounds_min.y, vertex.location.y), min(node.bounds_min.z, vertex.location.z)))
-                            node.bounds_max = Vector((max(node.bounds_min.x, vertex.location.x), max(node.bounds_min.y, vertex.location.y), max(node.bounds_min.z, vertex.location.z)))
+                            #node.bounds_max = Vector((max(node.bounds_min.x, vertex.location.x), max(node.bounds_min.y, vertex.location.y), max(node.bounds_min.z, vertex.location.z)))
+                            node.bounds_max = Vector((max(node.bounds_max.x, vertex.location.x), max(node.bounds_max.y, vertex.location.y), max(node.bounds_max.z, vertex.location.z)))
+                            
 
             #print("Processed", node.name, node.bind_matrix)
             node.child_count = len(bone.children)
@@ -320,7 +441,7 @@ class ModelBuilder(object):
                     scaled_time = time * (1.0 / get_framerate())
 
                     subframe_time = time - floor(time)
-                    bpy.context.scene.frame_set(time, subframe = subframe_time)
+                    bpy.context.scene.frame_set(int(time), subframe = subframe_time)
 
                     transform = Animation.Keyframe.Transform()
 

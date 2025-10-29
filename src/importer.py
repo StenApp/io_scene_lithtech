@@ -227,15 +227,29 @@ def import_model(model, options):
                     bm = bmesh.new()
                     bm.from_mesh(mesh)
 
-                    # Add vertices
-                    for vertex in lod.vertices:
+                    # # Add vertices
+                    # for vertex in lod.vertices:
+                        # try:
+                            # bm.verts.new(vertex.location)
+                        # except Exception as e:
+                            # print(f"Error adding vertex: {e}")
+                            # # Add a fallback vertex at origin
+                            # bm.verts.new((0, 0, 0))
+                    
+                    for vertex_index, vertex in enumerate(lod.vertices):
                         try:
-                            bm.verts.new(vertex.location)
+                            bm_vert = bm.verts.new(vertex.location)
+                            
+                            # CRITICAL FIX: Store weight.location for export!
+                            # Create a custom attribute layer if it doesn't exist
+                            if 'weight_data' not in mesh.attributes:
+                                # We'll store it in mesh object custom properties instead
+                                pass  # Will use mesh_object custom properties
+                                
                         except Exception as e:
                             print(f"Error adding vertex: {e}")
-                            # Add a fallback vertex at origin
-                            bm.verts.new((0, 0, 0))
-
+                            bm.verts.new((0, 0, 0))                    
+                    
                     bm.verts.ensure_lookup_table()
                     duplicate_face_indices = []
                     
@@ -297,6 +311,27 @@ def import_model(model, options):
                     face_offset += len(lod.faces)
 
                     bm.to_mesh(mesh)
+                    
+                    # Store original weight data for exact export
+                    # Build the list first, THEN assign to custom property
+                    weight_data_list = []
+
+                    for vertex in lod.vertices:
+                        vertex_weights = []
+                        for weight in vertex.weights:
+                            # Store as simple list of floats (no dict - more compatible)
+                            vertex_weights.extend([
+                                float(weight.node_index),
+                                weight.location.x,
+                                weight.location.y, 
+                                weight.location.z,
+                                weight.bias
+                            ])
+                        weight_data_list.append(vertex_weights)
+
+                    # Assign the complete list at once
+                    mesh_object["abc_weight_data"] = weight_data_list                    
+                    
                     bm.free()
 
                     # Check if LOD normals are found
@@ -400,11 +435,11 @@ def import_model(model, options):
                                     vertex_group = mesh_object.vertex_groups[attachment_bone_name]
                                     vertex_indices = list(range(len(lod.vertices)))
                                     vertex_group.add(vertex_indices, 1.0, 'REPLACE')
-                                    print(f"  ✅ Rigid mesh '{piece.name}' weighted 1.0 to '{attachment_bone_name}' ({len(vertex_indices)} vertices)")
+                                    print(f"  âœ… Rigid mesh '{piece.name}' weighted 1.0 to '{attachment_bone_name}' ({len(vertex_indices)} vertices)")
                                 else:
-                                    print(f"  ⚠️  Attachment bone '{attachment_bone_name}' not found in vertex groups")
+                                    print(f"  âš ï¸  Attachment bone '{attachment_bone_name}' not found in vertex groups")
                             else:
-                                print(f"  ⚠️  Invalid attachment node index {attachment_node_index}")
+                                print(f"  âš ï¸  Invalid attachment node index {attachment_node_index}")
                         else:
                             # Handle skeletal mesh - use individual vertex weights
                             for (vertex_index, vertex) in enumerate(lod.vertices):
@@ -533,8 +568,8 @@ def import_model(model, options):
 
                                 # For every bone
                                 for bone, node in zip(armature_object.pose.bones, model.nodes):
-                                    bone.keyframe_insert('location', frame=subframe_time)
-                                    bone.keyframe_insert('rotation_quaternion', frame=subframe_time)
+                                    bone.keyframe_insert('location', frame=int(subframe_time))
+                                    bone.keyframe_insert('rotation_quaternion', frame=int(subframe_time))
                                 # End For
 
                                 if hasattr(options, 'should_import_vertex_animations') and options.should_import_vertex_animations:
@@ -558,7 +593,7 @@ def import_model(model, options):
                                     # End For
 
                                     mesh.shape_keys.eval_time = shape_key.frame
-                                    mesh.shape_keys.keyframe_insert("eval_time", frame=subframe_time)
+                                    mesh.shape_keys.keyframe_insert("eval_time", frame=int(subframe_time))
                                 # End For
                             except Exception as e:
                                 print(f"Error processing keyframe {keyframe_index} for animation {animation.name}: {e}")

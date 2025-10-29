@@ -59,7 +59,9 @@ class Vertex(object):
         # NEW: Add these to preserve original object-space data
         self.original_location = None  # Original object-space position from LTB
         self.original_normal = None    # Original object-space normal from LTB
-
+        
+        # ABC IMPORT FIX: Store original weight.location data
+        self.original_weights = []  # ← NEU HINZUFÜGEN!
 
 class FaceVertex(object):
     def __init__(self):
