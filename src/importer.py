@@ -35,12 +35,17 @@ class ModelImportOptions(object):
 
 def import_model(model, options):
     try:
+        # Clear scene if requested
+        #if hasattr(options, 'should_clear_scene') and options.should_clear_scene:
+            #utils.delete_all_objects()
+            
+        utils.delete_all_objects()    
+        
         #delete all old actions (animation player)
         if options.should_import_animations:
             for action in list(bpy.data.actions):
                 bpy.data.actions.remove(action)
-                
-        # utils.delete_all_objects()
+               
 
         # Validate model before proceeding
         if not model.pieces:
@@ -631,7 +636,11 @@ def import_model(model, options):
         # This may not be the best place to do it, but it works for now!
         if hasattr(model, 'version') and (model.version == 6 or getattr(model, 'flip_geom', False)):
             armature_object.scale.z = -1.0
-
+        
+        # Save command_string as custom property for export
+        if hasattr(model, 'command_string'):
+            armature_object['command_string'] = model.command_string
+        
         return {'FINISHED'}
     except Exception as e:
         show_message_box(f"Error during model import: {str(e)}", "Import Error", 'ERROR')
@@ -706,11 +715,11 @@ class ImportOperatorABC(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         default=False,
     )
 
-    should_clear_scene: BoolProperty(
-        name="Clear Scene",
-        description="When checked, the scene will be cleared before the model is imported.",
-        default=False,
-    )
+    # should_clear_scene: BoolProperty(
+        # name="Clear Scene",
+        # description="When checked, the scene will be cleared before the model is imported.",
+        # default=False,
+    # )
 
     def draw(self, context):
         layout = self.layout
@@ -735,9 +744,9 @@ class ImportOperatorABC(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         box.row().prop(self, 'should_import_animations')
         box.row().prop(self, 'should_import_vertex_animations')
 
-        box = layout.box()
-        box.label(text='Misc')
-        box.row().prop(self, 'should_clear_scene')
+        #box = layout.box()
+        #box.label(text='Misc')
+        #box.row().prop(self, 'should_clear_scene')
 
     def execute(self, context):
         # Load the model
@@ -776,7 +785,7 @@ class ImportOperatorABC(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
         options.should_import_vertex_animations = self.should_import_vertex_animations
         options.should_import_sockets = self.should_import_sockets
         options.should_merge_pieces = self.should_merge_pieces
-        options.should_clear_scene = self.should_clear_scene
+        #options.should_clear_scene = self.should_clear_scene
         options.image = image
         
         # Import the model

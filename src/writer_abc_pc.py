@@ -1,6 +1,6 @@
 import struct
 import itertools
-
+from mathutils import Vector
 
 class ABCModelWriter(object):
     @staticmethod
@@ -109,12 +109,39 @@ class ABCModelWriter(object):
 
         ''' Nodes '''
         buffer = bytearray()
-        for node in model.nodes:
+        
+        # Detect if this is a character or weapon/prop model
+        node_names_lower = [node.name.lower() for node in model.nodes]
+        has_head = any('head' in name for name in node_names_lower)
+        has_leg = any('leg' in name for name in node_names_lower)
+        is_character = has_head and has_leg
+        
+        for node_index, node in enumerate(model.nodes):
             buffer.extend(self._string_to_bytes(node.name))
-            buffer.extend(struct.pack('Hb', node.index, node.flags))
+            
+            # Set node flags based on model type if not already set correctly
+            # Characters need 1 on root/null and 0 in _zN..., 2 in rest
+            # Weapons/props need 1 on root/null and 0 on rest nodes
+            node_flags = node.flags
+            if node_index == 0:
+                node_flags = 1  # Root node always gets flag 1 (MNODE_REMOVABLE)
+            elif is_character:
+                # Character model: _zN_ nodes get 0, others get 2 (MNODE_ROTATIONONLY)
+                if "_zN_" in node.name or "zN" in node.name:
+                    node_flags = 0
+                else:
+                    node_flags = 2
+            else:
+                # Weapon/prop model: all non-root nodes get 0
+                node_flags = 0
+            
+            buffer.extend(struct.pack('Hb', node.index, node_flags))
             # TODO: extract this out to a function
-            # TODO: not entirely surprising that this is wrong, the "bind_matrix" is probably relative to parent
-            # when it needs to be in world-space? or vice versa
+            
+            # NOTE: bind_matrix space is CORRECT - verified via 010 Editor comparison:
+            # Original vs exported matrices are identical. The matrix_world @ matrix_local 
+            # calculation in the Builder produces the correct world-space transforms that 
+            # LithTech expects. No changes needed.
             for f in list(itertools.chain(*[row.to_tuple() for row in node.bind_matrix])):
                 buffer.extend(struct.pack('f', f))
             buffer.extend(struct.pack('I', len(node.children)))
@@ -122,7 +149,7 @@ class ABCModelWriter(object):
         buffer.extend(struct.pack('I', 0))  # TODO: weight set count, use BONE GROUPS
 
         sections.append(Section('Nodes', bytes(buffer)))
-
+                
         ''' ChildModels '''
         buffer = bytearray()
         buffer.extend(struct.pack('H', len(model.child_models)))
@@ -137,7 +164,26 @@ class ABCModelWriter(object):
         buffer = bytearray()
         buffer.extend(struct.pack('I', len(model.animations)))
         for animation in model.animations:
-            buffer.extend(self._vector_to_bytes(animation.extents))
+            
+            #buffer.extend(self._vector_to_bytes(animation.extents))
+            # Check if extents need to be set with fallback logic
+            anim_extents = animation.extents
+            if anim_extents.magnitude == 0.0:
+                # Detect model type from node names
+                node_names_lower = [node.name.lower() for node in model.nodes]
+                has_head = any('head' in name for name in node_names_lower)
+                has_leg = any('leg' in name for name in node_names_lower)
+                has_arm = any('arm' in name for name in node_names_lower)
+                has_wrist = any('wrist' in name for name in node_names_lower)
+                
+                if has_head and has_leg:
+                    anim_extents = Vector((24.0, 53.0, 24.0))  # Character
+                elif has_arm and has_wrist:
+                    anim_extents = Vector((1.5, 2.0, 1.5))  # Weapon
+                else:
+                    anim_extents = Vector((1.0, 1.0, 1.0))  # Props/Objects
+            
+            buffer.extend(self._vector_to_bytes(anim_extents))
             buffer.extend(self._string_to_bytes(animation.name))
             buffer.extend(struct.pack('i', animation.unknown1))
             buffer.extend(struct.pack('I', animation.interpolation_time))

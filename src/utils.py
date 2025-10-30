@@ -55,11 +55,16 @@ def show_message_box(message = "", title = "Message Box", icon = 'INFO'):
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 
+
 def delete_all_objects():
     if bpy.ops.object.mode_set.poll():
         bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
+    
+    # Clear collections (except the master collection)
+    for collection in list(bpy.data.collections):
+        bpy.data.collections.remove(collection)
 
 
 def make_suzanne():

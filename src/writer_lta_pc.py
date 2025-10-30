@@ -144,6 +144,20 @@ class LTAModelWriter(object):
         
         print(f"Model is character (109 weightsets): {is_character}")
         
+        # Basis-Dimensionen bestimmen (direkt nach is_character Check)
+        node_names_lower = [node.name.lower() for node in model.nodes]
+        has_head = any('head' in name for name in node_names_lower)
+        has_leg = any('leg' in name for name in node_names_lower)
+        has_arm = any('arm' in name for name in node_names_lower)
+        has_wrist = any('wrist' in name for name in node_names_lower)
+
+        if has_head and has_leg:
+            base_dims = Vector((24.0, 53.0, 24.0))  # Character
+        elif has_arm and has_wrist:
+            base_dims = Vector((1.5, 2.0, 1.5))     # Weapon
+        else:
+            base_dims = Vector((1.0, 1.0, 1.0))     # Prop
+        
         root_node = LTANode('lt-model-0')
 
         on_load_cmds_node = root_node.create_child('on-load-cmds')
@@ -153,37 +167,21 @@ class LTAModelWriter(object):
         ab_list_node = on_load_cmds_container.create_child('anim-bindings')
         ab_container_node = ab_list_node.create_container()
         
-        if hasattr(model, 'animations') and len(model.animations) > 0:
-            if hasattr(model, 'anim_bindings') and len(model.anim_bindings) > 0:
-                for i, anim_binding in enumerate(model.anim_bindings):
-                    anim_dims = anim_binding.extents
+        
+        for i, animation in enumerate(model.animations):
+            anim_dims = getattr(animation, 'extents', base_dims)
+            if anim_dims.magnitude == 0.0:
+                anim_dims = base_dims
 
-                    if (anim_dims.magnitude == 0.0):
-                        anim_dims = Vector((10.0, 10.0, 10.0))
+            ab_node = ab_container_node.create_child('anim-binding')
+            ab_node.create_child('name', animation.name)
+            ab_node.create_child('dims').create_property(anim_dims)
+            ab_node.create_child('translation').create_property(Vector((0.0, 0.0, 0.0)))
 
-                    ab_node = ab_container_node.create_child('anim-binding')
-                    ab_node.create_child('name', anim_binding.name)
-                    ab_node.create_child('dims').create_property(anim_dims)
-                    ab_node.create_child('translation').create_property(anim_binding.origin)
-                    interp_time = 200
-                    if i < len(model.animations) and hasattr(model.animations[i], 'interpolation_time'):
-                        interp_time = model.animations[i].interpolation_time
-                    ab_node.create_child('interp-time', interp_time)
-            else:
-                for i, animation in enumerate(model.animations):
-                    ab_node = ab_container_node.create_child('anim-binding')
-                    ab_node.create_child('name', animation.name)
-                    
-                    anim_dims = getattr(animation, 'extents', Vector((24.0, 53.0, 24.0)))
-                    if (anim_dims.magnitude == 0.0):
-                        anim_dims = Vector((24.0, 53.0, 24.0))
-                    ab_node.create_child('dims').create_property(anim_dims)
-                    
-                    ab_node.create_child('translation').create_property(Vector((0.0, 0.0, 0.0)))
-                    
-                    interp_time = getattr(animation, 'interpolation_time', 200)
-                    ab_node.create_child('interp-time', interp_time)
+            interp_time = getattr(animation, 'interpolation_time', 200)
+            ab_node.create_child('interp-time', interp_time)
 
+       
         # Node Flags
         #Characters need 1 on root/null and 0 in _zN... , 2 in rest
         #guns need 1 on root/null and 0 on rest nodes
@@ -518,8 +516,8 @@ class LTAModelWriter(object):
         # ANIMATIONS
         for animation in model.animations:
             as_node = root_node.create_child('animset', animation.name)
-            as_node.create_child('dims').create_property(animation.extents)
-
+            #as_node.create_child('dims').create_property(animation.extents)
+            
             keyframe_node = as_node.create_child('keyframe')
             keyframe2_node = keyframe_node.create_child('keyframe')
 
@@ -530,7 +528,8 @@ class LTAModelWriter(object):
             values_list = []
 
             for keyframe in animation.keyframes:
-                times_list.append(keyframe.time)
+                #times_list.append(keyframe.time)
+                times_list.append(int(round(keyframe.time))) # Convert seconds to milliseconds (integer)
 
                 if keyframe.string is None:
                     keyframe.string = ""
