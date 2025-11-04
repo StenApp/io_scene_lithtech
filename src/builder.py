@@ -250,7 +250,22 @@ class ModelBuilder(object):
         model.child_models.append(child_model)
 
         ''' Animations '''
-        for action in bpy.data.actions:
+        # Respect original animation order if available (stored during import)
+        if "animation_order" in armature_object:
+            print("Using original animation order from import")
+            actions_to_process = []
+            for anim_name in armature_object["animation_order"]:
+                action = bpy.data.actions.get(anim_name)
+                if action:
+                    actions_to_process.append(action)
+                else:
+                    print(f"Warning: Animation '{anim_name}' not found in bpy.data.actions")
+        else:
+            # Fallback: use alphabetical order (Blender default)
+            print("No animation order found, using alphabetical order")
+            actions_to_process = list(bpy.data.actions)
+        
+        for action in actions_to_process:
             # skip any actions prefixed with "d_"; they're vertex animation lanes, we don't want them in the ABCv6 output
             if match(r"^d_", action.name):
                 continue

@@ -640,6 +640,11 @@ def import_model(model, options):
         # Save command_string as custom property for export
         if hasattr(model, 'command_string'):
             armature_object['command_string'] = model.command_string
+        # Save animation order for correct export sequence
+        if hasattr(model, 'animations') and model.animations:
+            animation_names = [anim.name for anim in model.animations]
+            armature_object['animation_order'] = animation_names
+            print(f"Saved animation order: {animation_names}")
         
         return {'FINISHED'}
     except Exception as e:
