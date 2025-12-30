@@ -525,7 +525,12 @@ def import_model(model, options):
                         for keyframe_index, keyframe in enumerate(animation.keyframes):
                             try:
                                 # Set keyframe time - Scale it down to the default blender animation framerate (25fps)
-                                subframe_time = keyframe.time * get_framerate()
+                                #subframe_time = keyframe.time * get_framerate()
+                                
+                                fps = get_framerate()
+                                frame = (keyframe.time / 1000.0) * fps
+                                
+                                                               
                                 '''
                                 Recursively apply transformations to a nodes children
                                 Notes: It carries everything (nodes, pose_bones..) with it, because I expected it to not be a child of this scope...oops!
@@ -569,13 +574,23 @@ def import_model(model, options):
                                 '''
                                 Func End
                                 '''
+                                
+                                scene = bpy.context.scene
+                                scene.frame_set(int(frame), subframe=frame % 1.0)
+                                
                                 recursively_apply_transform(model.nodes, 0, armature_object.pose.bones, None)
 
-                                # For every bone
-                                for bone, node in zip(armature_object.pose.bones, model.nodes):
-                                    bone.keyframe_insert('location', frame=int(subframe_time))
-                                    bone.keyframe_insert('rotation_quaternion', frame=int(subframe_time))
-                                # End For
+                                # # For every bone
+                                # for bone, node in zip(armature_object.pose.bones, model.nodes):
+                                    # bone.keyframe_insert('location', frame=int(subframe_time))
+                                    # bone.keyframe_insert('rotation_quaternion', frame=int(subframe_time))
+                                # # End For
+                                
+                                # Keyframes setzen (mit Subframes!) 
+                                for pose_bone in armature_object.pose.bones: 
+                                    pose_bone.keyframe_insert("location", frame=frame) 
+                                    pose_bone.keyframe_insert("rotation_quaternion", frame=frame)
+                                # End For    
 
                                 if hasattr(options, 'should_import_vertex_animations') and options.should_import_vertex_animations:
                                     # shape keys, here I go!
@@ -600,6 +615,9 @@ def import_model(model, options):
                                     mesh.shape_keys.eval_time = shape_key.frame
                                     mesh.shape_keys.keyframe_insert("eval_time", frame=int(subframe_time))
                                 # End For
+                                
+                            
+                            
                             except Exception as e:
                                 print(f"Error processing keyframe {keyframe_index} for animation {animation.name}: {e}")
 
@@ -615,6 +633,22 @@ def import_model(model, options):
                 # Add our actions to animation data
                 if actions:
                     armature_object.animation_data.action = actions[0]
+                    
+                    # Store original keyframe data for export
+                    for anim_index, animation in enumerate(model.animations):
+                        if anim_index < len(actions):
+                            action = actions[anim_index]
+                            keyframe_data = []
+                            
+                            for keyframe in animation.keyframes:
+                                keyframe_data.append({
+                                    "time": int(keyframe.time),  # Store as milliseconds
+                                    "string": keyframe.string if keyframe.string else ""
+                                })
+                            
+                            action["lithtech_keyframes"] = keyframe_data
+                            print(f"Stored {len(keyframe_data)} keyframes for {animation.name}")
+         
                 if hasattr(options, 'should_import_vertex_animations') and options.should_import_vertex_animations and md_actions:
                     mesh.shape_keys.animation_data.action = md_actions[0]
             except Exception as e:
@@ -640,6 +674,7 @@ def import_model(model, options):
         # Save command_string as custom property for export
         if hasattr(model, 'command_string'):
             armature_object['command_string'] = model.command_string
+        
         # Save animation order for correct export sequence
         if hasattr(model, 'animations') and model.animations:
             animation_names = [anim.name for anim in model.animations]

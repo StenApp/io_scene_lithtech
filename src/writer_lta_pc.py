@@ -528,8 +528,12 @@ class LTAModelWriter(object):
             values_list = []
 
             for keyframe in animation.keyframes:
-                #times_list.append(keyframe.time)
-                times_list.append(int(round(keyframe.time))) # Convert seconds to milliseconds (integer)
+                
+                #print(f"DEBUG writer: keyframe.time = {keyframe.time}")
+                
+                time_ms = int(round(keyframe.time))
+
+                times_list.append(time_ms)
 
                 if keyframe.string is None:
                     keyframe.string = ""
@@ -560,4 +564,4 @@ class LTAModelWriter(object):
             print("Serializing node list...")
             s_root_node = root_node.serialize()
             f.write(s_root_node)
-            print("Finished serializing node list!")
+            print("Finished serializing node list! Wrote LTA file.")

@@ -137,13 +137,15 @@ class ABCModelWriter(object):
             
             buffer.extend(struct.pack('Hb', node.index, node_flags))
             # TODO: extract this out to a function
+                        
+            # for f in list(itertools.chain(*[row.to_tuple() for row in node.bind_matrix])):
+                # buffer.extend(struct.pack('f', f))
+            # buffer.extend(struct.pack('I', len(node.children)))
             
-            # NOTE: bind_matrix space is CORRECT - verified via 010 Editor comparison:
-            # Original vs exported matrices are identical. The matrix_world @ matrix_local 
-            # calculation in the Builder produces the correct world-space transforms that 
-            # LithTech expects. No changes needed.
-            for f in list(itertools.chain(*[row.to_tuple() for row in node.bind_matrix])):
-                buffer.extend(struct.pack('f', f))
+            for row in node.bind_matrix:
+                for f in row:
+                    buffer.extend(struct.pack('f', f))
+
             buffer.extend(struct.pack('I', len(node.children)))
 
         buffer.extend(struct.pack('I', 0))  # TODO: weight set count, use BONE GROUPS

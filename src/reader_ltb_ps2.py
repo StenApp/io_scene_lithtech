@@ -293,6 +293,9 @@ class PS2LTBModelReader(object):
         keyframe = Animation.Keyframe()
         keyframe.time = unpack('I', f)[0]
         keyframe.string = self._read_string(f)
+        
+        #print(f"DEBUG LTB reader: keyframe.time = {keyframe.time}, string = '{keyframe.string}'")
+        
         return keyframe
 
     def _read_animation(self, f):
@@ -864,11 +867,14 @@ class PS2LTBModelReader(object):
                         
                         print(f"Node map: {node_map}")
                         
-                        # Read and process vertex weights
+                        
+                        # Read and process vertex weights - FIRST collect all weights
+                        processed_weights_list = []
+                        
                         for wi in range(lod_vertex_count):
                             weights = unpack('4h', f)
-                            # This line has the wrong variable name
-                            node_indices = unpack('4b', f)  # Changed from node_indexes to node_indices
+                            #node_indices = unpack('4b', f)
+                            node_indices = unpack('4B', f)
                             
                             normalized_weights = []
                             
@@ -884,7 +890,7 @@ class PS2LTBModelReader(object):
                             for j in range(len(normalized_weights)):
                                 weight = Weight()
                                 weight.bias = normalized_weights[j]
-                                weight.node_index = node_indices[j]  # Changed from node_indexes to node_indices
+                                weight.node_index = node_indices[j]
                                 
                                 if weight.node_index != 0:
                                     weight.node_index /= 4
@@ -894,19 +900,95 @@ class PS2LTBModelReader(object):
                                 weight.node_index = node_map[weight.node_index]
                                 processed_weights.append(weight)
                             
-                            # Match weights to vertices by position
-                            ordered_vertex = ordered_vertices[wi]
+                            processed_weights_list.append(processed_weights)
+                        
+                        # === IMPROVED WEIGHT ASSIGNMENT ===
+                        # Build position -> weights mapping
+                        position_to_weights = {}
+                        
+                        for wi, (ordered_vertex, weights) in enumerate(zip(ordered_vertices, processed_weights_list)):
+                            # Create position key with rounding for tolerance
+                            key = (round(ordered_vertex.location.x, 4),
+                                   round(ordered_vertex.location.y, 4),
+                                   round(ordered_vertex.location.z, 4))
                             
-                            for vi in range(len(lod.vertices)):
-                                vertex = lod.vertices[vi]
+                            if key not in position_to_weights:
+                                position_to_weights[key] = []
+                            
+                            position_to_weights[key].append({
+                                'weights': weights,
+                                'location': ordered_vertex.location
+                            })
+                        
+                        # Assign weights to lod.vertices
+                        assigned_count = 0
+                        unassigned_count = 0
+                        
+                        for vi, vertex in enumerate(lod.vertices):
+                            key = (round(vertex.location.x, 4),
+                                   round(vertex.location.y, 4),
+                                   round(vertex.location.z, 4))
+                            
+                            if key in position_to_weights and position_to_weights[key]:
+                                # Pop the first available weight entry for this position
+                                entry = position_to_weights[key].pop(0)
                                 
-                                if ordered_vertex.location == vertex.location:
-                                    lod.vertices[vi].weights = copy.copy(processed_weights)
-                                    # Set weight locations
-                                    for i in range(len(lod.vertices[vi].weights)):
-                                        lod.vertices[vi].weights[i].location = (ordered_vertex.location @ Matrix())
+                                lod.vertices[vi].weights = copy.copy(entry['weights'])
+                                
+                                # Set weight locations
+                                for w in lod.vertices[vi].weights:
+                                    w.location = Vector(entry['location'])
+                                
+                                assigned_count += 1
+                            else:
+                                # No weights found for this position
+                                unassigned_count += 1
+                        
+                        print(f"Weight assignment: {assigned_count} assigned, {unassigned_count} unassigned")
+                        
+                        # # Read and process vertex weights
+                        # for wi in range(lod_vertex_count):
+                            # weights = unpack('4h', f)
+                            # # This line has the wrong variable name
+                            # node_indices = unpack('4b', f)  # Changed from node_indexes to node_indices
+                            
+                            # normalized_weights = []
+                            
+                            # # Normalize weights
+                            # for weight in weights:
+                                # if weight == 0:
+                                    # continue
+                                # normalized_weights.append(float(weight) / 4096.0)
+                            
+                            # processed_weights = []
+                            
+                            # # Process node indices
+                            # for j in range(len(normalized_weights)):
+                                # weight = Weight()
+                                # weight.bias = normalized_weights[j]
+                                # weight.node_index = node_indices[j]  # Changed from node_indexes to node_indices
+                                
+                                # if weight.node_index != 0:
+                                    # weight.node_index /= 4
+                                    # weight.node_index = int(weight.node_index)
+                                
+                                # # Map to global node index
+                                # weight.node_index = node_map[weight.node_index]
+                                # processed_weights.append(weight)
+                            
+                            # # Match weights to vertices by position
+                            # ordered_vertex = ordered_vertices[wi]
+                            
+                            # for vi in range(len(lod.vertices)):
+                                # vertex = lod.vertices[vi]
+                                
+                                # if ordered_vertex.location == vertex.location:
+                                    # lod.vertices[vi].weights = copy.copy(processed_weights)
+                                    # # Set weight locations
+                                    # for i in range(len(lod.vertices[vi].weights)):
+                                        # lod.vertices[vi].weights[i].location = (ordered_vertex.location @ Matrix())
                                     
-                                    break
+                                    # break
                     
                     # Add the LOD to the piece
                     piece_object.lods.append(lod)

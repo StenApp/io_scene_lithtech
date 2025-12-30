@@ -271,6 +271,17 @@ class ModelBuilder(object):
                 continue
 
             print("Processing animation %s" % action.name)
+            
+            # DEBUG: Check custom property
+            if "lithtech_keyframes" in action:
+                orig_kf = action["lithtech_keyframes"]
+                print(f"DEBUG builder: Found custom property with {len(orig_kf)} keyframes")
+                #if len(orig_kf) > 0:
+                    #print(f"DEBUG builder: First keyframe time = {orig_kf[0]['time']}")
+            else:
+                print(f"DEBUG builder: NO custom property for {action.name}")
+            
+                        
             animation = Animation()
             animation.name = action.name
 
@@ -323,16 +334,76 @@ class ModelBuilder(object):
             # End For
 
             # First let's setup our keyframes
-            # For now we can just use the first node!
-            for time in keyframe_timings[model.nodes[0].name]['rotation_quaternion']:
-                # Expand our time
-                scaled_time = time * (1.0 / get_framerate())
+            # Restore original keyframe data if available
+            original_keyframes = action.get("lithtech_keyframes", [])
+            keyframe_index = 0
+            
+            ### For now we can just use the first node!
+                       
+            #for time in keyframe_timings[model.nodes[0].name]['rotation_quaternion']:
+            
+            # Collect all Keyframe-times of all animated Bones
+            all_keyframe_times = set()
+            for bone_name in keyframe_timings:
+                all_keyframe_times.update(keyframe_timings[bone_name]['rotation_quaternion'])
+                all_keyframe_times.update(keyframe_timings[bone_name]['location'])
+            all_keyframe_times = sorted(list(all_keyframe_times))
 
-                subframe_time = time - floor(time)
-                bpy.context.scene.frame_set(int(time), subframe = subframe_time)
+            for time in all_keyframe_times:
+                fps = get_framerate()
+
+                # time = Blender-Frame (float)
+                frame = time
+
+                # Szene korrekt auf Subframe setzen
+                bpy.context.scene.frame_set(int(frame), subframe=frame % 1.0)
 
                 keyframe = Animation.Keyframe()
-                keyframe.time = scaled_time
+
+                # Originalzeiten wiederherstellen, falls vorhanden
+                original_keyframes = action.get("lithtech_keyframes", [])
+                if keyframe_index < len(original_keyframes):
+                    keyframe.time = original_keyframes[keyframe_index]["time"]
+                    keyframe.string = original_keyframes[keyframe_index]["string"]
+                else:
+                    # Frame → Millisekunden
+                    time_ms = (frame / fps) * 1000.0
+                    keyframe.time = time_ms
+                    keyframe.string = ""
+
+                keyframe_index += 1
+                
+            #for time in all_keyframe_times:
+                # # Expand our time
+                # scaled_time = time * (1.0 / get_framerate())
+
+                # subframe_time = time - floor(time)
+                # bpy.context.scene.frame_set(int(time), subframe = subframe_time)
+
+                # keyframe = Animation.Keyframe()
+                             
+                # # Use original timing if available
+                # original_keyframes = action.get("lithtech_keyframes", [])
+                
+                # if keyframe_index < len(original_keyframes):
+                    # loaded_time = original_keyframes[keyframe_index]["time"]
+                    
+                    # #print(f"DEBUG builder: Loading keyframe {keyframe_index}: time = {loaded_time}")
+                    
+                    # keyframe.time = loaded_time
+                    
+                    # #print(f"DEBUG builder: After /1000: keyframe.time = {keyframe.time}")
+                    
+                    # keyframe.string = original_keyframes[keyframe_index]["string"]
+                # else:
+                    # print(f"DEBUG builder: Creating NEW keyframe {keyframe_index}: scaled_time = {scaled_time*1000}")
+                    # keyframe.time = scaled_time *1000
+                    # keyframe.string = ""
+                
+                # keyframe_index += 1
+                
+                
+
 
                 # will using mesh_object here break if there's multiple mesh objects using the same armature as a parent? DON'T DO THAT
                 # grab any 2 opposite corners of the blender bounding box
@@ -352,6 +423,14 @@ class ModelBuilder(object):
                 animation.bounds_max.x = max(animation.bounds_max.x, keyframe.bounds_max.x)
                 animation.bounds_max.y = max(animation.bounds_max.y, keyframe.bounds_max.y)
                 animation.bounds_max.z = max(animation.bounds_max.z, keyframe.bounds_max.z)
+                
+            # Make sure all Nodes have all Keyframe-times
+            for node in model.nodes:
+                if node.name not in keyframe_timings:
+                    keyframe_timings[node.name] = {
+                        'rotation_quaternion': list(all_keyframe_times),
+                        'location': list(all_keyframe_times)
+                    }
 
             # Okay let's start processing our transforms!
             for node_index, (node, pose_bone) in enumerate(zip(model.nodes, armature_object.pose.bones)):
