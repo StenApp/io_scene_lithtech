@@ -3010,7 +3010,8 @@ HASH_LOOKUP = {
         "Scope",
         "Silencer",
         "Laser",
-        "Flash"
+        "Flash",
+        "SpotLight"
     ],
     "animations" : [
         # Characters
@@ -3038,6 +3039,7 @@ HASH_LOOKUP = {
         "Reload",
         "Hand",
         "World",
+        "none",
         "Lockpick",
         "lockpick",
         "safecracker",

@@ -100,6 +100,8 @@ class ModelBuilder(object):
                 v = Vertex()
                 v.location = vertex.co  # Keine Transformation!
                 
+                print(f"BUILDER Vertex 0: {mesh.vertices[0].co}")
+                
                 # ===== 2. DANN Weights sammeln =====
                 weights = []
                 

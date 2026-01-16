@@ -451,16 +451,37 @@ class LTAModelWriter(object):
             
             face_index_list = []
             uv_index_list = []
-
-            for lod in piece.lods:
+            
+            #TODO export all lods
+            # Only export LOD 0 (highest quality) to LTA
+            #for lod in piece.lods:
+            for lod in piece.lods[:1]:
                 for face in lod.faces:
                     for face_vertex in face.vertices:
                         texcoords = [face_vertex.texcoord.x, face_vertex.texcoord.y]
                         uv_container.create_property(texcoords)
                         face_index_list.append(face_vertex.vertex_index)
-
+                
+                
+                # # writer_lta_pc.py, ersetze die gesamte RIGID-Logik:
+                # for vertex in lod.vertices:
+                    # vertex_container.create_property(vertex.location)
+                    # normal_container.create_property(vertex.normal)
+                    
+                    # if is_rigid:
+                        # # Verwende original untransformierte Koordinaten
+                        # if hasattr(vertex, 'original_location'):
+                            # vertex_container.create_property(vertex.original_location)
+                            # normal_container.create_property(vertex.original_normal)
+                        # else:
+                            # vertex_container.create_property(vertex.location)
+                            # normal_container.create_property(vertex.normal)
+                
                 for vertex in lod.vertices:
                     if is_rigid:
+                        
+                        print(f"DIRECT Vertex 0: {lod.vertices[0].location}")
+                        print(f"DIRECT Vertex 0 original: {lod.vertices[0].original_location}")
                         # For rigid meshes, we need to transform coordinates to the correct space for LTA
                         if hasattr(vertex, 'original_location') and vertex.original_location is not None:
                             # Get the attachment bone

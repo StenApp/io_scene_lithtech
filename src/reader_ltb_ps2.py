@@ -438,18 +438,31 @@ class PS2LTBModelReader(object):
         
         # Set up weights for all vertices to attach to the single bone
         print(f"     Setting up rigid mesh weights for {len(lod.vertices)} vertices")
-        for vertex in lod.vertices:
-            # Clear any existing weights
-            vertex.weights = []
-            
-            # Create single weight pointing to attachment bone
-            weight = Weight()
-            weight.node_index = node_index
-            weight.location = vertex.original_location  # Use original object space location
-            weight.bias = 1.0  # Full weight to attachment bone
-            vertex.weights.append(weight)
         
-        print(f"     ✅ Set rigid mesh weights: all vertices → Node {node_index}")
+        # In _position_rigid_mesh(), Zeile 441-450:
+        for vertex in lod.vertices:
+            # Only set default weight if vertex has NO weights yet
+            if not hasattr(vertex, 'weights') or len(vertex.weights) == 0:
+                vertex.weights = []
+                weight = Weight()
+                weight.node_index = node_index
+                weight.location = vertex.original_location
+                weight.bias = 1.0
+                vertex.weights.append(weight)
+            # Otherwise keep existing weights from binary!
+        
+        # for vertex in lod.vertices:
+            # # Clear any existing weights
+            # vertex.weights = []
+            
+            # # Create single weight pointing to attachment bone
+            # weight = Weight()
+            # weight.node_index = node_index
+            # weight.location = vertex.original_location  # Use original object space location
+            # weight.bias = 1.0  # Full weight to attachment bone
+            # vertex.weights.append(weight)
+        
+        # print(f"     ✅ Set rigid mesh weights: all vertices → Node {node_index}")
         return True
 
     # REMOVE the separate _transform_rigid_vertices method call since we do it inline now
