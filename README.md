@@ -2,11 +2,11 @@
 
 This addon is forked from [io_scene_abc](https://github.com/cmbasnett/io_scene_abc), renamed to io_scene_lithtech due to the increased scope.
 
-This addon provides limited support for importing and exporting various Lithtech models formats from [various games](https://en.wikipedia.org/wiki/LithTech#Games_using_LithTech) such as [Shogo](https://en.wikipedia.org/wiki/Shogo:_Mobile_Armor_Division), and [No One Lives Forever](https://en.wikipedia.org/wiki/The_Operative:_No_One_Lives_Forever) to and from Blender 2.8x/2.9x.
+This addon provides limited support for importing and exporting various Lithtech models formats from [various games](https://en.wikipedia.org/wiki/LithTech#Games_using_LithTech) such as [Shogo](https://en.wikipedia.org/wiki/Shogo:_Mobile_Armor_Division), and [No One Lives Forever](https://en.wikipedia.org/wiki/The_Operative:_No_One_Lives_Forever) to and from Blender 4.1.
 
 ## How To Install
 
-Download or clone the repository, and zip up the contents of the `src` folder. Go to `Edit -> Preferences` in Blender 2.8x/2.9x, go to the `Add-ons` tab, select `install` and then select the zip file you just created.
+Download or clone the repository, and zip up the contents of the `src` folder. Go to `Edit -> Preferences` in Blender 4.1, go to the `Add-ons` tab, select `install` and then select the zip file you just created.
 
 To download the respository, click the green `Code -> Download ZIP` at the top of the main page.
 
