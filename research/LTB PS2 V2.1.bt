@@ -1,0 +1,945 @@
+//------------------------------------------------
+//--- 010 Editor v10.0 Binary Template
+//
+//      File: PS2 LTB
+//   Authors: Jake Breen (Modified)
+//   Version: 4.1
+//   Purpose: Parse PS2 LTB model files with proper section boundary checking
+//  Category: Game/PS2
+// File Mask: *.ltb
+//  ID Bytes: 
+//   History: Added section boundary checking to prevent reading past piece data
+//            Streamlined endVIF pattern detection for reliable batch processing
+//            Improved handling of multiple LODs and different mesh types
+//            Enhanced skeletal mesh trailing data processing
+//            Fixed syntax errors in for loops
+//            Removed DataCount limit of 100 to handle larger mesh sets
+//            Fixed handling of UnknownFlag=128 to properly process last MeshData
+//            Refined endVIF pattern detection to match 3 zeros + 0x15000000
+//------------------------------------------------
+// PS2 LTB
+typedef unsigned char uint8;
+typedef unsigned short uint16;
+typedef unsigned int uint32;
+
+// Constants for processing
+local float WEIGHT_NORMALIZE_FACTOR = 4096.0;  // Divide weights by this to get 0-1 range
+local int NODE_INDEX_DIVISOR = 4;              // Divide node indices by this before lookup
+
+// File information tracking
+local string filename = GetFileName();
+local int currentPieceNumber = 0;
+local int currentNodeNumber = 0;
+local int currentLODNumber = 0;
+// Declare match variable early
+local int matchFound = 0;
+
+// Add section boundary tracking
+local uint32 nodeStartOffset = 0;
+local uint32 currentOffset = 0;
+
+local uint32 weightMapBytes = 0;
+local int searchLimit = 0;
+local int searchCount = 0;
+local uint32 maxVertices = 0;
+local uint32 safeVertexCount = 0;
+local uint32 maxNodes = 0;
+local uint32 safeNodeCount = 0;
+local uint32 maxWeights = 0;
+local uint32 safeWeightCount = 0;
+
+struct Vector4 {
+    float x;
+    float y;
+    float z;
+    float w;
+};
+
+struct Vector3 {
+    float x;
+    float y;
+    float z;
+};
+
+struct TexCoord {
+    float u;
+    float v;
+};
+
+struct Quat {
+    float x;
+    float y;
+    float z;
+    float w;
+};
+
+// VIFCodes: https://gtamods.com/wiki/PS2_Native_Geometry
+struct CommandSignal {
+    short constant1;
+    uchar variable;
+    uchar VIFCode; // 0x11=FLUSH, 0x15=MSCALF, 0x6C=UNPACK
+};
+
+struct Section {
+    short StringCount;
+    char String[StringCount];
+};
+
+struct Header {
+    uint32 FileType;     // Expected: 2 for PS2 LTB
+    uint16 Version;      // Expected: 16 for this format
+    uint16 Reserved1;
+    uint32 Reserved2;
+    uint32 Reserved3; 
+    uint32 Reserved4;
+    uint32 OffsetOffset; // Offset Section Offset...
+    uint32 PieceOffset; // Maybe?
+    uint32 NodeOffset; 
+    uint32 ChildModelOffset;
+    uint32 AnimationOffset;
+    uint32 SocketOffset;
+    uint32 FileSize;
+    uint32 padding;//[11];  
+};
+
+struct ModelInfo {
+    //uint32 Version;
+    uint32 KeyframeCount;
+    uint32 AnimationCount;
+    uint32 NodeCount;
+    uint32 PieceCount;
+    uint32 ChildModelCount;
+    uint32 TriangleCount;
+    uint32 VertexCount;
+    uint32 WeightCount;
+    uint32 LODCount; 
+    uint32 SocketCount;
+    uint32 WeightSetCount;
+    uint32 StringCount;
+    uint32 StringLengthCount;
+    uint32 unknown;
+    short CommandStringLength;
+    char CommandString[CommandStringLength];
+    float InternalRadius;
+};
+
+struct ModelInfoExtended {
+    uint32 HashValue; // Hash magic number for lookup
+    uint32 unk1;
+    uint32 unk2;
+};
+
+struct PieceInfo {
+    uint32 PieceCount;
+};
+
+enum <int> eMeshType
+{
+    Rigid = 4,
+    Skeletal = 5,
+    VertexAnimated = 6,
+};
+
+struct Piece {
+    uint32 hashedpiecename; // Hashed piece name
+    float SpecularPower;
+    float SpecularScale;
+    float LODWeight;
+    float unkFloatyPadding[9];
+    uint32 TextureIndex; // Material texture index
+    uint32 Unknown[2];
+    int Four;
+    // MeshType moved to PieceLOD structure
+};
+
+struct FaceVertex {
+    TexCoord UVCoord;
+    uint16 VertexIndex;
+};
+
+struct Face {
+    FaceVertex vertex[3];
+};
+
+struct MeshData {
+    Vector3 VertexData;
+    float VertexPadding; // Always 1.0f
+    Vector3 NormalData;
+    float NormalPadding; // Always 0.0f
+    TexCoord UVData;
+    float UVPadding;
+    uint32 Unknown;
+};
+
+struct MeshSet {
+    uchar DataCount;
+    uchar UnknownFlag; // If 128, then it's the last Set!
+    short Padding;
+    uint32 RenderPatchStart; //00402E30
+    uint32 WindingOrder;     // 0x412 = Normal, 0x8412 = Reversed
+    uint32 Unknown3;
+};
+
+struct MeshSetExtended
+{
+    float Unknown1;
+    float Unknown2;
+    float Unknown3;
+    float Unknown4;
+};
+
+struct GeometryBatchHeader {
+    uint32 VertexCount;
+    uint32 WeightedNodesCount;
+};
+
+struct BatchConnector {
+    CommandSignal UnknownSignal;
+    uint32 Unknown2;
+    CommandSignal FlushSignal;
+    uint32 Unknown[4];
+};
+
+struct PS2VIFUnpack {
+    CommandSignal UnpackSignal;
+    uint32 MeshSetCount;
+    uint32 MeshDataCount;
+    uint32 Zero[2];
+};
+
+// Renamed UnknownSectorSize to WeightMapCount for clarity
+struct SkeletalMeshData {
+    uint32 SkelUnk;
+    uint32 WeightMapCount; // Size of weight mapping data in shorts (total bytes = WeightMapCount*2)
+};
+
+struct Node {
+    uint16 NameLength;
+    char   Name[NameLength];
+    Vector4 Matrix[4];
+    uint32 ParentPiece; //proofed to be HashedNodeName
+    uint32 ChildCount;
+    short Index;
+    short Unk;
+};
+
+struct NodeOther {
+    uint32 WeightSetCount;
+};
+
+struct WeightSet {
+    uint32 ID;
+    uint32 NodeCount;
+    float Weights[NodeCount];
+};
+
+struct EndSignal {
+    uint32 Padding[3];
+    CommandSignal signal;
+};
+
+struct ExtraVertNorm {
+    float x, y, z;
+    float vertexPadding;
+    float nx, ny, nz;
+    float normalPadding;
+};
+
+struct ExtraVertNormWrapper (uint32 count) {
+    ExtraVertNorm list[count] <optimize=false>;
+};
+
+struct NodeMap {
+    uint32 node;
+};  
+ 
+struct NodeMapWrapper (uint32 count) {
+    NodeMap nodelist[count] <optimize=false>;
+};
+
+// WeightMap entry structure for handling the weight map data
+struct WeightMapEntry {
+    short count;
+    if (count > 0) {
+        short values[count] <optimize=false>;
+    }
+};
+
+// A simpler approach to processing weight map data - just skip bytes
+void ProcessWeightMap(uint32 weightMapCount) {
+    local uint32 totalBytesToProcess = weightMapCount * 2;
+    
+    // Calculate padding required to make the total size divisible by 16
+    local uint32 paddingRequired = 0;
+    if (totalBytesToProcess % 16 != 0) {
+        paddingRequired = 16 - (totalBytesToProcess % 16);
+    }
+    
+    // Print weight map information
+    Printf("    WeightMap: %d shorts (%d bytes, padded to %d bytes)\n", 
+           weightMapCount, 
+           totalBytesToProcess, 
+           totalBytesToProcess + paddingRequired);
+    
+    // Skip over the weight map data including padding
+    FSkip(totalBytesToProcess + paddingRequired);
+}
+
+struct VertexWeight {
+    short firstWeight;
+    short secondWeight;
+    short thirdWeight;
+    short forthWeight;
+    
+    char firstNode;
+    char secondNode;
+    char thirdNode;
+    char forthNode;
+};
+
+struct VertexWeightsWrapper (uint32 count) {
+    VertexWeight weights[count] <optimize=false>;
+};
+
+struct Socket {
+    uint32 unk1;
+    Quat rotation;
+    Vector3 location;
+    uint32 padding;
+    uint32 nodeIndex;
+    uint32 hashedString;
+    uint32 unk3;
+};
+
+struct ChildModel {
+    short stringLength;
+    char Name[stringLength];
+};
+
+struct ChildModelHeader {
+    uint32 Count;
+};
+
+struct AnimationHeader {
+    uint32 Count;
+};
+
+struct KeyFrame {
+    uint32 Time;
+    short StringCount;
+    if (StringCount > 0) {
+        // Add basic EOF protection
+        if (FTell() + StringCount <= FileSize()) {
+            char String[StringCount];
+        } else {
+            Printf("    Warning: Would read past EOF at 0x%X, stopping\n", FTell());
+            return; // Exit parsing
+        }
+    } else {
+        // Don't try to read a string when StringCount is 0
+    }
+};
+
+struct CompressedFrame {
+    short Location[3]; 
+    short LocationScaleFlag;
+    short Rotation[4]; 
+};
+
+struct NodeKeyframe (uint32 Count)
+{
+    uint32 StartMarker;
+    if (KeyFrameCount > 0) {  // Keep using KeyFrameCount from outer scope
+        CompressedFrame Frames[KeyFrameCount];
+    }
+};
+
+struct Animation (uint32 nodeCount) {
+    Vector3 Dims;
+    Vector3 Translation;
+    uint32 HashedString;
+    uint32 InterpolationTime;
+    uint32 KeyFrameCount;
+    
+    // Only read KeyFrames and Nodes if KeyFrameCount > 0
+    if (KeyFrameCount > 0) {
+        KeyFrame KeyFrames[KeyFrameCount] <optimize=false>;
+        NodeKeyframe Nodes(KeyFrameCount)[nodeCount] <optimize=false>;
+    }
+};
+
+struct WeightHeader {
+    uint32 Count;
+};
+
+// This structure organizes LOD data for a single level of detail
+struct PieceLOD {
+    eMeshType MeshType; // Now part of the LOD structure
+};
+
+// Helper function to check if we've reached the node section
+int reachedNodeSection() {
+    currentOffset = FTell();
+    return (currentOffset >= nodeStartOffset && nodeStartOffset > 0);
+}
+
+// Helper function to check if MeshType is valid
+int isValidMeshType(int meshType) {
+    return (meshType == 4 || meshType == 5 || meshType == 6);
+}
+
+// Helper function to find vertex data after weight map
+int findVertexDataStart(uint32 startPosition) {
+    local uint32 searchPosition = startPosition;
+    local int maxSearch = Min(200, nodeStartOffset - startPosition);
+    local int foundPos = -1;
+    local int i;
+    local float potentialPadding;
+    local float x, y, z;
+    
+    Printf("    Searching for vertex data pattern starting at 0x%X\n", startPosition);
+    
+    // Search for vertex data pattern - signature is VertexPadding == 1.0f
+    for (i = 0; i < maxSearch; i += 4) {
+        if (searchPosition + i + 12 >= nodeStartOffset) {
+            break; // Don't search past node section
+        }
+        
+        potentialPadding = ReadFloat(searchPosition + i + 12); // Offset to where padding should be
+        
+        if (potentialPadding == 1.0f) {
+            // Additional validation - check nearby values for reasonable vertex components
+            x = ReadFloat(searchPosition + i);
+            y = ReadFloat(searchPosition + i + 4);
+            z = ReadFloat(searchPosition + i + 8);
+            
+            // Check if values are within reasonable range for vertex coordinates
+            if (x > -1000.0f && x < 1000.0f && 
+                y > -1000.0f && y < 1000.0f && 
+                z > -1000.0f && z < 1000.0f) {
+                Printf("    Found vertex data at offset 0x%X (padding=1.0)\n", searchPosition + i);
+                foundPos = searchPosition + i;
+                break;
+            }
+        }
+    }
+    
+    if (foundPos == -1) {
+        Printf("    WARNING: Could not find vertex data in search range\n");
+    }
+    
+    return foundPos;
+}
+
+//Begin of parsing Model
+Header hdr;
+ModelInfo info;
+ModelInfoExtended infoEx;
+
+// Store node section start for boundary checking
+nodeStartOffset = hdr.NodeOffset;
+
+// Print basic file info
+Printf("--------------------------------\n");
+Printf("Filename: %s\n", filename);
+Printf("--------------------------------\n");
+Printf("Total LOD Count: %d\n", info.LODCount);
+Printf("Model Hash: 0x%08X\n", infoEx.HashValue);
+Printf("Total Piece Count: %d\n", info.PieceCount);
+Printf("Total Node Count: %d\n", info.NodeCount);
+Printf("Node section starts at: 0x%X\n", nodeStartOffset);
+Printf("--------------------------------\n");
+
+FSeek(hdr.PieceOffset);
+PieceInfo pieceInfo;
+
+// Print piece info header
+Printf("PIECE INFORMATION:\n");
+Printf("PieceCount: %d\n\n", pieceInfo.PieceCount);
+
+local int i = 0;
+local int j = 0;
+local int lodIndex = 0;
+local int count = 0;
+local int meshSetIndex = 0;
+local uint32 meshSetCheck = 0;
+
+local int setStart = 0;
+local int setEnd = 0;
+local int setSize = 0;
+
+local int peekAmount = 0;
+local int checkForMoreData = 0;
+local short UnpackConstant = 0;
+local uchar UnpackVariable = 0;
+local uchar UnpackVIFCommand = 0;
+local uint32 EndSignalZero[3] = { 0, 0, 0 };
+local uint32 EndSignalData = 0;
+local int breakFromPieces = 0;
+local float heroEight1 = 0.0f;
+local float heroEight2 = 0.0f;
+local float heroEight3 = 0.0f;
+local float testFloat = 0.0f;
+local int test = 0;
+local int totalStuff = 0;
+local int testZero1 = 0;
+local int testZero2 = 0;
+local float testAfter = 0.0f;
+local int pad = 0;
+local int currentPos = 0;
+local float testValue = 0;
+
+// For endVIF detection and vertex data handling
+local int processingDone = 0;
+local int vertexStartPos = 0;
+
+// Variables for endVIF detection
+local uint32 lastValue;
+local uint32 firstValue;
+local uint32 secondValue;
+local uint32 thirdValue;
+
+// Store piece information for later comparison
+local uint32 pieceHashes[100]; // Use fixed size array to avoid possible issues
+
+// Process pieces
+for(i = 0; i < pieceInfo.PieceCount && !reachedNodeSection(); i++)
+{
+    Piece piece;
+    pieceHashes[currentPieceNumber] = piece.hashedpiecename;
+    
+    // Print piece information
+    Printf("Piece %d: 0x%08X\n", 
+           currentPieceNumber, 
+           piece.hashedpiecename);
+    
+    currentPieceNumber++;
+    
+    // Process each LOD for this piece
+    for(lodIndex = 0; lodIndex < info.LODCount && !reachedNodeSection(); lodIndex++) {
+        // Reset state variables for each new LOD
+        checkForMoreData = 0;
+        processingDone = 0;
+        
+        if (breakFromPieces) {
+            break;
+        }
+        
+        // Check if we're about to enter the node section
+        if (reachedNodeSection()) {
+            Printf("  Reached node section, stopping piece processing\n");
+            break;
+        }
+        
+        // Read mesh type for this LOD
+        PieceLOD pieceLOD;
+        
+        // Check if mesh type is valid, if not we've probably hit the next section
+        if (!isValidMeshType(pieceLOD.MeshType)) {
+            Printf("  Invalid MeshType %d detected, likely reached the end of piece data\n", pieceLOD.MeshType);
+            // Jump back 4 bytes (the MeshType we just read)
+            FSeek(FTell() - 4);
+            break;
+        }
+        
+        Printf("  LOD %d: MeshType %d\n", lodIndex, pieceLOD.MeshType);
+        
+        // For Skeletal meshes, read SkeletalMeshData
+        if (pieceLOD.MeshType == 5) {
+            SkeletalMeshData skeletalMeshData;
+            Printf("    WeightMapCount: %d\n", skeletalMeshData.WeightMapCount);
+        } else {
+            // For non-skeletal meshes, we don't read SkeletalMeshData
+            Printf("    No weight map for non-skeletal mesh\n");
+        }
+        
+        GeometryBatchHeader geometryBatchHeader;
+        
+        // Sanity check for vertex count and node count - just check for obviously impossible values
+        if (geometryBatchHeader.VertexCount > 50000 || geometryBatchHeader.WeightedNodesCount > 1000) {
+            Printf("    WARNING: Suspicious geometry data: Vertices=%d, WeightedNodes=%d\n", 
+                  geometryBatchHeader.VertexCount, 
+                  geometryBatchHeader.WeightedNodesCount);
+            Printf("    Likely reached end of piece data or corrupt values\n");
+            // Move back to before GeometryBatchHeader
+            FSeek(FTell() - 8);
+            break;
+        }
+        
+        Printf("    Vertices: %d, WeightedNodes: %d\n", 
+              geometryBatchHeader.VertexCount,
+              geometryBatchHeader.WeightedNodesCount);
+        
+        // Process all batches for this LOD
+        while (!reachedNodeSection()) {
+            // Check if we're looking for another batch
+            if (checkForMoreData) {
+                peekAmount = sizeof(BatchConnector);
+                
+                // Ensure we're not peeking past the node section
+                if (FTell() + peekAmount >= nodeStartOffset) {
+                    Printf("    Would peek past node section, stopping batch processing\n");
+                    break;
+                }
+                
+                UnpackConstant = ReadShort(FTell() + peekAmount);
+                UnpackVariable = ReadUByte(FTell() + peekAmount + 2);
+                UnpackVIFCommand = ReadUByte(FTell() + peekAmount + 3);
+    
+                if (UnpackConstant != 80 || UnpackVIFCommand != 108) {
+                    break;
+                }
+    
+                checkForMoreData = 0;
+            }
+    
+            count = 0;
+    
+            BatchConnector batchConnector;
+            PS2VIFUnpack pS2VIFUnpack <optimize=false>;
+            
+            setStart = FTell();
+            while(!reachedNodeSection()) {
+                // Check for another potential boundary condition
+                if (FTell() + 16 >= nodeStartOffset) {
+                    Printf("    Would read past node section, stopping mesh processing\n");
+                    break;
+                }
+                
+                meshSetCheck = ReadUInt(FTell() + 4);
+        
+                if (meshSetCheck != 808337408) {
+                    FSkip(4*4);
+                }
+    
+                test = 0;
+                MeshSet Data <optimize=false>;
+                
+                // Check that we're not processing past a valid bound - removed hard limit of 100
+                if (Data.DataCount > 1000) { // Only check for obviously wrong values
+                    Printf("    WARNING: Suspicious DataCount %d, stopping mesh processing\n", Data.DataCount);
+                    break;
+                }
+                
+                for (j = 0; j < Data.DataCount && !reachedNodeSection(); j++) {
+                    // Verify we're not going to read past the node section
+                    if (FTell() + 16 >= nodeStartOffset) {
+                        Printf("    Would read past node section, stopping mesh data processing\n");
+                        break;
+                    }
+                    
+                    testFloat = ReadFloat(FTell() + (4*3));
+                    if (testFloat != 1.0f) {
+                        FSeek(FTell() + (4*4));
+                    }
+                    totalStuff += 1;
+    
+                    struct MeshData meshData;
+                }            
+    
+                count += Data.DataCount;
+        
+                if (count >= pS2VIFUnpack.MeshDataCount) {
+                    break;
+                }
+        
+                // Only break AFTER fully processing the current MeshSet
+                if (Data.UnknownFlag == 128) {
+                    Printf("    Found UnknownFlag=128, last MeshSet in batch\n");
+                    break;
+                }
+        
+                meshSetIndex++;
+                test += Data.DataCount;
+            }
+            
+            // Check for section boundary again
+            if (reachedNodeSection()) {
+                Printf("    Reached node section during batch processing\n");
+                break;
+            }
+            
+            // IMPROVED: Precise endVIF pattern detection - look for exactly 3 zeros + 0x15000000
+            if (FTell() + 16 < nodeStartOffset) {
+                // Read the exact pattern we're looking for
+                firstValue = ReadUInt(FTell());
+                secondValue = ReadUInt(FTell() + 4);
+                thirdValue = ReadUInt(FTell() + 8);
+                lastValue = ReadUInt(FTell() + 12);
+                
+                // Check for 3 zeros followed by 0x15000000 (MSCALF command)
+                if (firstValue == 0 && secondValue == 0 && thirdValue == 0 && lastValue == 0x15000000) {
+                    Printf("    Found endVIF pattern (3 zeros + 0x15000000)\n");
+                    EndSignal endSignal;
+                }
+                // Check alternative pattern - 3 zeros + 0x11000000 (FLUSH command)
+                else if (firstValue == 0 && secondValue == 0 && thirdValue == 0 && lastValue == 0x11000000) {
+                    Printf("    Found alternative endVIF pattern (3 zeros + 0x11000000)\n");
+                    EndSignal endSignal;
+                }
+                // Try to handle alternative or non-standard endVIF
+                else {
+                    // Check if the data might be MeshSetExtended (reasonable float values)
+                    float firstFloatValue = ReadFloat(FTell());
+                    
+                    if (firstFloatValue > -100.0f && firstFloatValue < 100.0f) {
+                        Printf("    Reading as MeshSetExtended\n");
+                        MeshSetExtended dataExtended;
+                    }
+                    else {
+                        // Generic skip as last resort
+                        Printf("    Unrecognized endVIF (%08X %08X %08X %08X), skipping 16 bytes\n", 
+                               firstValue, secondValue, thirdValue, lastValue);
+                        FSkip(16);
+                    }
+                }
+            } else {
+                Printf("    Cannot read EndSignal, would cross section boundary\n");
+                break;
+            }
+            
+            setEnd = FTell();
+            setSize = setEnd - setStart;
+            
+            Printf("    Batch size: %d bytes\n", setSize);
+            
+            // Check for another batch pattern if we haven't reached the node section
+            if (!reachedNodeSection()) {
+                peekAmount = sizeof(BatchConnector);
+                
+                // Ensure we're not peeking past the node section
+                if (FTell() + peekAmount < nodeStartOffset) {
+                    // Read the pattern markers to check for another batch
+                    UnpackConstant = ReadShort(FTell() + peekAmount);
+                    UnpackVariable = ReadUByte(FTell() + peekAmount + 2);
+                    UnpackVIFCommand = ReadUByte(FTell() + peekAmount + 3);
+                    
+                    // Check if the pattern matches a BatchConnector
+                    if (UnpackConstant == 80 && UnpackVIFCommand == 108) {
+                        Printf("    Found another batch pattern, continuing...\n");
+                        checkForMoreData = 1;
+                    } else {
+                        Printf("    No additional batch pattern found\n");
+                        checkForMoreData = 0;
+                    }
+                } else {
+                    Printf("    Would peek past node section, stopping batch check\n");
+                    checkForMoreData = 0;
+                }
+            } else {
+                checkForMoreData = 0;
+            }
+            
+            // If no more batches found and this is a skeletal mesh, process trailing data
+            if (!checkForMoreData && pieceLOD.MeshType == 5 && !processingDone && !reachedNodeSection()) {
+                Printf("    Processing skeletal mesh trailing data...\n");
+                
+                // Process weight map data if present
+                if (skeletalMeshData.WeightMapCount > 0) {
+                    // Make sure processing weight map won't exceed node section
+                    weightMapBytes = skeletalMeshData.WeightMapCount * 2;
+                    if (weightMapBytes % 16 != 0) {
+                        weightMapBytes += (16 - (weightMapBytes % 16)); // Add padding
+                    }
+                    
+                    if (FTell() + weightMapBytes < nodeStartOffset) {
+                        ProcessWeightMap(skeletalMeshData.WeightMapCount);
+                    } else {
+                        Printf("    Cannot process weight map, would cross section boundary\n");
+                        break;
+                    }
+                } else {
+                    Printf("    No weight map data present\n");
+                }
+                
+                // Check boundary again
+                if (reachedNodeSection()) {
+                    Printf("    Reached node section after weight map\n");
+                    break;
+                }
+                
+                // Find and process vertex data
+                vertexStartPos = findVertexDataStart(FTell());
+                
+                if (vertexStartPos >= 0 && vertexStartPos < nodeStartOffset) {
+                    // Seek to the vertex data position
+                    FSeek(vertexStartPos);
+                    
+                    // Calculate the max number of elements we can read before the node section
+                    maxVertices = (nodeStartOffset - FTell()) / 32; // Each vertex is approximately 32 bytes
+                    safeVertexCount = Min(geometryBatchHeader.VertexCount, maxVertices);
+                    
+                    if (safeVertexCount > 0 && safeVertexCount < 50000) {
+                        // Found the data, read the structures
+                        ExtraVertNormWrapper extraMeshData(safeVertexCount);
+                        
+                        // Check boundary again
+                        if (reachedNodeSection()) {
+                            Printf("    Reached node section after vertex data\n");
+                            break;
+                        }
+                        
+                        // Calculate max node entries
+                        maxNodes = (nodeStartOffset - FTell()) / 4; // Each node entry is 4 bytes
+                        safeNodeCount = Min(geometryBatchHeader.WeightedNodesCount, maxNodes);
+                        
+                        if (safeNodeCount > 0 && safeNodeCount < 1000) {
+                            NodeMapWrapper nodemaplist(safeNodeCount);
+                            
+                            // Check boundary again
+                            if (reachedNodeSection()) {
+                                Printf("    Reached node section after node map\n");
+                                break;
+                            }
+                            
+                            // Calculate max weight entries
+                            maxWeights = (nodeStartOffset - FTell()) / 12; // Each weight is approximately 12 bytes
+                            safeWeightCount = Min(geometryBatchHeader.VertexCount, maxWeights);
+                            
+                            if (safeWeightCount > 0 && safeWeightCount < 50000) {
+                                VertexWeightsWrapper weights(safeWeightCount);
+                            }
+                        }
+                    }
+                } else {
+                    Printf("    Could not locate vertex data\n");
+                }
+                
+                // Mark as processed to avoid duplicate processing
+                processingDone = 1;
+                
+                // Break out of batch loop once trailing data is processed
+                break;
+            }
+            
+            // If it's a rigid mesh (type 4) or we've already processed trailing data,
+            // break out of batch processing loop if no more batches
+            if (!checkForMoreData) {
+                break;
+            }
+        }
+        
+        Printf("    LOD %d processing complete\n", lodIndex);
+    }
+    
+    Printf("\n");
+    
+    // If we've reached the node section, break out of the piece loop
+    if (reachedNodeSection()) {
+        Printf("Reached node section, stopping piece processing\n");
+        break;
+    }
+}
+
+// Ensure we're at the node section start for node processing
+if (FTell() != nodeStartOffset) {
+    Printf("Adjusting position to node section: 0x%X\n", nodeStartOffset);
+    FSeek(nodeStartOffset);
+}
+
+// Additional safeguard - verify we are actually at the node section before proceeding
+if (FTell() != nodeStartOffset) {
+    Printf("ERROR: Failed to position at the node section!\n");
+    // Don't continue processing if we can't position correctly
+    return;
+}
+
+Printf("--------------------------------\n");
+Printf("NODE INFORMATION:\n");
+Printf("--------------------------------\n");
+
+// Process nodes
+Node nodes[info.NodeCount] <optimize=false>;
+
+// Print node information
+for(i = 0; i < info.NodeCount; i++) {
+    Printf("Node %d: %s\n", i, nodes[i].Name);
+    Printf("  Parent Piece: 0x%08X\n", nodes[i].ParentPiece);
+    Printf("  Node Index: %d\n", nodes[i].Index);
+    Printf("  Node ChildCount: %d\n", nodes[i].ChildCount);
+    
+    // Try to match ParentPiece with piece hashes
+    matchFound = 0;
+    for(j = 0; j < pieceInfo.PieceCount; j++) {
+        if(nodes[i].ParentPiece == pieceHashes[j]) {
+            Printf("  [Matched with Piece %d]\n", j);
+            matchFound = 1;
+            break;
+        }
+    }
+    
+    if(!matchFound) {
+        Printf("  [No matching piece found]\n");
+    }
+    
+    Printf("\n");
+}
+
+// Rest of parsing with error handling
+Printf("--------------------------------\n");
+Printf("WEIGHT SET INFORMATION:\n");
+Printf("--------------------------------\n");
+//we expect 109 for models or 0 for non models
+NodeOther nodeOther;
+Printf("Weight Set Count: %d\n", nodeOther.WeightSetCount);
+
+if(nodeOther.WeightSetCount > 0 && nodeOther.WeightSetCount < 500) {
+    WeightSet weightSets[nodeOther.WeightSetCount] <optimize=false>;
+} else {
+    Printf("Skipping weight sets due to invalid count\n");
+}
+
+Printf("--------------------------------\n");
+Printf("CHILD MODEL INFORMATION:\n");
+Printf("--------------------------------\n");
+
+if (hdr.ChildModelOffset > 0) {
+    FSeek(hdr.ChildModelOffset);
+    ChildModelHeader childModelHdr;
+    Printf("Child Model Count: %d\n", childModelHdr.Count);
+
+    if(info.ChildModelCount > 1 && info.ChildModelCount < 500) {
+        ChildModel ChildModels[info.ChildModelCount - 1] <optimize=false>;
+    } else {
+        Printf("No additional child models to process\n");
+    }
+} else {
+    Printf("No child model section found\n");
+}
+
+Printf("--------------------------------\n");
+Printf("ANIMATION INFORMATION:\n");
+Printf("--------------------------------\n");
+
+if (hdr.AnimationOffset > 0 && hdr.AnimationOffset < FileSize()) {
+    FSeek(hdr.AnimationOffset);
+    AnimationHeader animationHdr;
+    Printf("Animation Count: %d\n", animationHdr.Count);
+    
+    // Parse the animations
+    Animation animation(info.NodeCount)[animationHdr.Count] <optimize=false>;
+} else {
+    Printf("No animation section found or invalid offset\n");
+}
+
+Printf("--------------------------------\n");
+Printf("SOCKET INFORMATION:\n");
+Printf("--------------------------------\n");
+
+if (hdr.SocketOffset > 0) {
+    FSeek(hdr.SocketOffset);
+    Printf("Socket Count: %d\n", info.SocketCount);
+
+    if(info.SocketCount > 0 && info.SocketCount < 500) {
+        Socket sockets[info.SocketCount] <optimize=false>;
+    } else {
+        Printf("No sockets to process\n");
+    }
+} else {
+    Printf("No socket section found\n");
+}
+
+Printf("--------------------------------\n");
+Printf("Analysis complete for %s\n", filename);
+Printf("--------------------------------\n");
+    
