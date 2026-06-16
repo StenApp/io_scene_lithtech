@@ -23,7 +23,9 @@
 //
 struct LTString {
     short stringLength;
+    if (stringLength>0){
     char Type[stringLength];
+    }
 };
 
 struct LTNormal {
@@ -103,7 +105,9 @@ struct Nodes {
     ushort TransformationIndex;
     uchar Flags;
     uint NumMDVerts; // number of vertices for mesh-deformed nodes / usually "0"
+    if (NumMDVerts > 0) {
     ushort MDVertList[NumMDVerts];
+    }
     uint NumChildren;
 };
 
