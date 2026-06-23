@@ -6,6 +6,10 @@ from ctypes import c_int
 HASH_LOOKUP = {
     "pieces" : [
     # piece names
+        # baron_formal (verified vs PS2 hashes, magic=9)
+        "torso3_3",
+        "left_leg2",
+        "left_leg8",
         "HandLeft_zTex1",
         "HandRight_zTex1",
         "Head_zTex1",

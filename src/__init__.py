@@ -1,103 +1,109 @@
+# -*- coding: utf-8 -*-
+"""
+io_scene_lithtech_clean
+=======================
+Saubere LithTech-Import-Pipeline fuer Blender, eine IR + eine
+Konvertierungsgrenze:
+
+    .abc / .ltb  ->  reader_dispatch  ->  abc.py:Model (roh LithTech)
+                     builder_import + coordinates.swap_*  ->  Blender
+
+Keine 90-Grad-Drehung, kein scale.z=-1. Alle Koordinaten werden einmalig an
+der Datengrenze konvertiert; Objekte haben Identity-Transform.
+
+STATISCHE STUFE: Skelett + Mesh + Normalen + UVs + Weights + Sockets.
+(Animation folgt als eigenes Modul animation_import.py.)
+
+Installation:  Edit > Preferences > Add-ons > Install... > diese ZIP waehlen,
+dann Haken setzen.  Danach: File > Import > LithTech Model (.abc/.ltb/.lta).
+"""
+
 bl_info = {
-    'name': 'Lithtech Tools',
-    'description': 'Import and export various Lithtech models and animations files.',
-    'author': 'Colin Basnett and HeyJake',
-    'version': (2, 0, 0),
-    'blender': (4, 0, 0),
-    'location': 'File > Import-Export',
-    'warning': 'This add-on is under development.',
-    'wiki_url': 'https://github.com/haekb/io_scene_lithtech/wiki',
-    'tracker_url': 'https://github.com/haekb/io_scene_lithtech/issues',
-    'support': 'COMMUNITY',
-    'category': 'Import-Export'
+    "name": "LithTech Model Import",
+    "author": "StenApp",
+    "version": (1, 0, 0),
+    "blender": (4, 1, 0),
+    "location": "File > Import > LithTech Model (.abc/.ltb/.lta)",
+    "description": "Import NOLF ABC PC / LTB PC / LTB PS2 models via the swap_* convention",
+    "category": "Import-Export",
 }
 
-if 'bpy' in locals():
-    import importlib
-    if 'hash_ps2'           in locals(): importlib.reload(hash_ps2)
-    if 's3tc'               in locals(): importlib.reload(s3tc)
-    if 'dxt'                in locals(): importlib.reload(dtx)
-    if 'abc'                in locals(): importlib.reload(abc)
-    if 'builder'            in locals(): importlib.reload(builder)
-    if 'reader_abc_pc'      in locals(): importlib.reload(reader_abc_pc)
-    if 'reader_ltb_ps2'     in locals(): importlib.reload(reader_ltb_ps2)
-    if 'writer_abc_pc'      in locals(): importlib.reload(writer_abc_pc)
-    if 'writer_lta_pc'      in locals(): importlib.reload(writer_lta_pc)
-    if 'importer'           in locals(): importlib.reload(importer)
-    if 'exporter'           in locals(): importlib.reload(exporter)
-    if 'converter'          in locals(): importlib.reload(converter)
-    if 'animation_ui'       in locals(): importlib.reload(animation_ui)
-    if 'vertex_normals'     in locals(): importlib.reload(vertex_normals)
+import importlib
 
 import bpy
-from . import hash_ps2
-from . import s3tc
-from . import dtx
-from . import abc
-from . import builder
-from . import reader_abc_pc
-from . import reader_ltb_ps2
-from . import writer_abc_pc
-from . import writer_lta_pc
-from . import importer
-from . import exporter
-from . import converter
-from . import animation_ui
-from . import vertex_normals
+from bpy.props import StringProperty, BoolProperty
+from bpy_extras.io_utils import ImportHelper
+
+# submodules (reload-safe on re-enable)
+from . import coordinates
+from . import reader_dispatch
+from . import builder_import
+from . import animation_import
+from . import exporter_lta
+from . import ui_anim
+
+for _m in (coordinates, reader_dispatch, builder_import, animation_import, exporter_lta, ui_anim):
+    importlib.reload(_m)
 
 
-from bpy.utils import register_class, unregister_class
+class IMPORT_OT_lithtech_clean(bpy.types.Operator, ImportHelper):
+    """Import a LithTech model (ABC PC / LTB PC / LTB PS2)"""
+    bl_idname = "import_scene.lithtech_clean"
+    bl_label = "Import LithTech Model"
+    bl_options = {'REGISTER', 'UNDO'}
 
-classes = (
-    importer.ImportOperatorABC,
-    importer.ImportOperatorLTB,
-    exporter.ExportOperatorABC,
-    exporter.ExportOperatorLTA,
-    converter.ConvertPCLTBToLTA,
-    converter.ConvertPS2LTBToLTA,
-)
+    filename_ext = ".abc"
+    filter_glob: StringProperty(default="*.abc;*.ltb;*.lta", options={'HIDDEN'})
+    import_anims: BoolProperty(
+        name="Import Animations",
+        description="Import each animation as its own Action on a separate NLA track",
+        default=True,
+    )
+
+    def execute(self, context):
+        import os
+        try:
+            model = reader_dispatch.read_model(self.filepath)
+        except Exception as e:
+            self.report({'ERROR'}, "Read failed: %s" % e)
+            return {'CANCELLED'}
+        try:
+            name = os.path.splitext(os.path.basename(self.filepath))[0]
+            arm_obj = builder_import.build_model(model, name)
+        except Exception as e:
+            self.report({'ERROR'}, "Build failed: %s" % e)
+            return {'CANCELLED'}
+
+        n_anims = 0
+        if self.import_anims:
+            try:
+                n_anims = animation_import.import_animations(model, arm_obj)
+            except Exception as e:
+                self.report({'WARNING'}, "Animations failed: %s" % e)
+
+        self.report({'INFO'}, "Imported %s (%d bones, %d pieces, %d anims)"
+                    % (name, len(model.nodes), len(model.pieces), n_anims))
+        return {'FINISHED'}
+
+
+def menu_func_import(self, context):
+    self.layout.operator(IMPORT_OT_lithtech_clean.bl_idname,
+                         text="LithTech Model (.abc/.ltb/.lta)")
+
 
 def register():
-    for cls in classes:
-        register_class(cls)
-        
-    # Animation UI
-    animation_ui.register()    
-
-    # Import options
-    bpy.types.TOPBAR_MT_file_import.append(importer.ImportOperatorABC.menu_func_import)
-    bpy.types.TOPBAR_MT_file_import.append(importer.ImportOperatorLTB.menu_func_import)
-
-    # Export options
-    bpy.types.TOPBAR_MT_file_export.append(exporter.ExportOperatorABC.menu_func_export)
-    bpy.types.TOPBAR_MT_file_export.append(exporter.ExportOperatorLTA.menu_func_export)
-
-    # Converters
-    bpy.types.TOPBAR_MT_file_import.append(converter.ConvertPCLTBToLTA.menu_func_import)
-    bpy.types.TOPBAR_MT_file_import.append(converter.ConvertPS2LTBToLTA.menu_func_import)
-    
-    # Helpers
-    vertex_normals.register()
+    bpy.utils.register_class(IMPORT_OT_lithtech_clean)
+    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    exporter_lta.register()
+    ui_anim.register()
 
 
 def unregister():
-    for cls in reversed(classes):
-        unregister_class(cls)
-        
-    # Animation UI
-    animation_ui.unregister()    
+    ui_anim.unregister()
+    exporter_lta.unregister()
+    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
+    bpy.utils.unregister_class(IMPORT_OT_lithtech_clean)
 
-    # Import options
-    bpy.types.TOPBAR_MT_file_import.remove(importer.ImportOperatorABC.menu_func_import)
-    bpy.types.TOPBAR_MT_file_import.remove(importer.ImportOperatorLTB.menu_func_import)
 
-    # Export options
-    bpy.types.TOPBAR_MT_file_export.remove(exporter.ExportOperatorABC.menu_func_export)
-    bpy.types.TOPBAR_MT_file_export.remove(exporter.ExportOperatorLTA.menu_func_export)
-
-    # Converters
-    bpy.types.TOPBAR_MT_file_import.remove(converter.ConvertPCLTBToLTA.menu_func_import)
-    bpy.types.TOPBAR_MT_file_import.remove(converter.ConvertPS2LTBToLTA.menu_func_import)
-
-    # Helpers
-    vertex_normals.unregister()
+if __name__ == "__main__":
+    register()
