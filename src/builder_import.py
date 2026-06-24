@@ -117,16 +117,53 @@ def build_piece(model, piece, arm_obj, collection):
         return None
     lod = piece.lods[0]
 
+    # Null-mesh LODs (LOD.type == 7) carry no vertices/faces at all. Bail out
+    # before touching Blender mesh APIs -- an empty mesh fed into
+    # normals_split_custom_set_from_vertices() is a known crash trigger.
+    if not lod.vertices or not lod.faces:
+        print("  [skip] piece '%s': empty LOD (type=%s, %d verts, %d faces)"
+              % (piece.name, getattr(lod, 'type', '?'), len(lod.vertices), len(lod.faces)))
+        return None
+
     verts = [tuple(swap_vec(v.location)) for v in lod.vertices]
     normals = [tuple(swap_dir(v.normal)) for v in lod.vertices]
+
+    # DIAGNOSTIC: some LTB vertex-format masks omit VTX_Normal entirely, in
+    # which case abc.py:Vertex.normal stays at its default (0,0,0). Feeding a
+    # zero/NaN vector into normals_split_custom_set_from_vertices() is the
+    # other known crash trigger -- sanitize and report instead of crashing.
+    bad_idx = [i for i, n in enumerate(normals)
+               if not all(c == c for c in n)                 # NaN check
+               or (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) < 1e-8]  # zero-length
+    if bad_idx:
+        print("  [normals] piece '%s': %d/%d degenerate normal(s), e.g. vertex idx %s -- using fallback (0,0,1)"
+              % (piece.name, len(bad_idx), len(normals), bad_idx[:5]))
+        for i in bad_idx:
+            normals[i] = (0.0, 0.0, 1.0)
+
+    # DIAGNOSTIC: degenerate (zero-area) triangles -- duplicate vertex index
+    # within one face -- also a known crash trigger for the custom-normals
+    # backend. Report them; they are dropped from the face list below.
+    degenerate_faces = 0
 
     faces, corner_uv = [], []
     for face in lod.faces:
         idx = [fv.vertex_index for fv in face.vertices]
+        if len(set(idx)) != 3:
+            degenerate_faces += 1
+            continue
         uv = [(fv.texcoord[0], 1.0 - fv.texcoord[1]) for fv in face.vertices]  # DX->Blender V
         a, c, b = flip_winding(idx)
         faces.append((a, c, b))
         corner_uv.append(flip_winding(uv))
+
+    if degenerate_faces:
+        print("  [faces] piece '%s': dropped %d degenerate (zero-area) face(s)"
+              % (piece.name, degenerate_faces))
+
+    if not faces:
+        print("  [skip] piece '%s': no valid faces after filtering" % piece.name)
+        return None
 
     mesh = bpy.data.meshes.new(piece.name)
     mesh.from_pydata(verts, [], faces)

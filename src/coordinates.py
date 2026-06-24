@@ -129,7 +129,15 @@ def geo_signature(coords):
         buf += _struct.pack('<3i', int(round(c[0] * 1e4)),
                             int(round(c[1] * 1e4)),
                             int(round(c[2] * 1e4)))
-    return _zlib.crc32(bytes(buf)) & 0xFFFFFFFF
+    val = _zlib.crc32(bytes(buf)) & 0xFFFFFFFF
+    # Blender ID-properties store int custom props as a SIGNED 32-bit C int
+    # (max 2147483647). crc32 is unsigned (0..4294967295), so roughly half
+    # of all signatures overflowed that and silently failed to store (caught
+    # by the try/except in builder_import as "[lt_normal] skipped: Python
+    # int too large to convert to C int"), leaving lt_geo_sig unset and
+    # making the exporter always assume the mesh was deformed. Wrap to
+    # signed range; still order-sensitive and still a valid equality check.
+    return val - 0x100000000 if val >= 0x80000000 else val
 
 
 def mat_close(a, b, eps=1e-5):
