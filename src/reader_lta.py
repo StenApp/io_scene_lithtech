@@ -561,6 +561,7 @@ class LTAModelReader(object):
         for aset in find_all(self._tree, 'animset'):
             name = first_string(aset) or "anim%d" % len(model.animations)
             times = self._anim_times(aset)
+            values = self._anim_values(aset)
             node_tracks = {}
 
             anims = shallow_find(aset, 'anims')
@@ -587,7 +588,7 @@ class LTAModelReader(object):
                 longest = max((len(t) for t in node_tracks.values()), default=0)
                 times = [i for i in range(longest)]
 
-            self._build_animation(model, name, times, node_tracks)
+            self._build_animation(model, name, times, node_tracks, values)
 
     def _anim_times(self, aset):
         kf_outer = shallow_find(aset, 'keyframe')
@@ -599,6 +600,21 @@ class LTAModelReader(object):
                 if not t and lists_of(tnode):
                     t = floats(lists_of(tnode)[0])
                 return t
+        return []
+
+    def _anim_values(self, aset):
+        """Per-keyframe frame/command strings (e.g. "cmd msg c2cam2
+        trigger"), parallel to _anim_times. Lives in the sibling 'values'
+        node inside the same (keyframe (keyframe ...)) block."""
+        kf_outer = shallow_find(aset, 'keyframe')
+        if kf_outer:
+            kf_inner = shallow_find(kf_outer, 'keyframe') or kf_outer
+            vnode = shallow_find(kf_inner, 'values')
+            if vnode:
+                v = atoms_of(vnode)[1:]
+                if not v and lists_of(vnode):
+                    v = [x for x in lists_of(vnode)[0] if isinstance(x, str)]
+                return v
         return []
 
     def _read_anim_track(self, anode, node_tracks, times):
@@ -644,17 +660,17 @@ class LTAModelReader(object):
         if track:
             node_tracks[target] = track
 
-    def _build_animation(self, model, name, times, node_tracks):
+    def _build_animation(self, model, name, times, node_tracks, values=None):
         anim = Animation()
         anim.name = name
         kc = len(times)
         anim.keyframe_count = kc
 
         anim.keyframes = []
-        for tt in times:
+        for i, tt in enumerate(times):
             kf = Animation.Keyframe()
             kf.time = int(round(tt * _TIME_TO_MS))
-            kf.string = ''
+            kf.string = values[i] if values and i < len(values) else ''
             anim.keyframes.append(kf)
 
         # one (loc, rot) per node per keyframe; un-animated nodes hold rest-local

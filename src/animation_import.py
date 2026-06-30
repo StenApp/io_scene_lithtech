@@ -95,6 +95,12 @@ def import_animations(model, arm_obj, fps=None):
         # only these instead of every frame, so the round-trip keeps the
         # original keyframe count/timing (e.g. 161, not 385).
         action['lta_keyframe_times'] = [float(kf.time) for kf in anim.keyframes]
+        # per-keyframe command/frame strings (e.g. "cmd msg c2cam2 trigger"),
+        # parallel to lta_keyframe_times by index. These have no Blender
+        # F-Curve representation, so they would otherwise silently vanish the
+        # moment a mesh edit forces a re-export -- stash them as a custom
+        # property on the action so they survive untouched.
+        action['lta_keyframe_strings'] = [kf.string or '' for kf in anim.keyframes]
 
         prev_q = {}                            # per-bone quaternion continuity
         for ki, kf in enumerate(anim.keyframes):
@@ -118,6 +124,17 @@ def import_animations(model, arm_obj, fps=None):
                 pb.rotation_quaternion = rot
                 pb.keyframe_insert('location', frame=frame, group=nd.name)
                 pb.keyframe_insert('rotation_quaternion', frame=frame, group=nd.name)
+
+        # Visible reference markers for non-empty frame strings (e.g.
+        # "cmd msg c2cam2 trigger") so they show up on the action's timeline
+        # too, not just in the hidden custom property above.
+        for ki, kf in enumerate(anim.keyframes):
+            if kf.string:
+                try:
+                    pm = action.pose_markers.new(name=kf.string[:63])
+                    pm.frame = _frame_for(kf.time, fps)
+                except Exception:
+                    pass
 
         # One NLA track per animation, MUTED by default. The LithTech
         # Animations panel selects one at a time (solo) -- NLA-based playback,

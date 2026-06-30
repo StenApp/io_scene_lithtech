@@ -573,6 +573,47 @@ class LTAExporter:
                     return True
         return False
 
+    def _check_frame_string_loss(self, action, explicit_times, explicit_strings):
+        """Warn (per animation, by name) if any non-empty frame string
+        stored on import ('lta_keyframe_strings') is about to be dropped
+        on export -- either because the exact original keyframe timing is
+        gone (re-sampled frame order no longer matches 1:1), or because the
+        string array is shorter than the current keyframe count."""
+        stored_strings = action.get('lta_keyframe_strings')
+        if not stored_strings:
+            return  # this action never had frame strings to begin with
+        stored_strings = list(stored_strings)
+        stored_times = action.get('lta_keyframe_times')
+        non_empty = [i for i, s in enumerate(stored_strings) if s]
+        if not non_empty:
+            return  # all strings were already empty -- nothing to lose
+
+        def label(i):
+            s = stored_strings[i]
+            if stored_times and i < len(stored_times):
+                return "%r @ %dms" % (s, int(stored_times[i]))
+            return "%r (index %d)" % (s, i)
+
+        if explicit_times is None:
+            self.warn(
+                "Animation '%s': %d frame string(s) DROPPED on export -- "
+                "'lta_keyframe_times' is missing or empty, so the exporter "
+                "fell back to re-scanning F-Curve keyframes and can no "
+                "longer match strings to the right frame. Lost: %s"
+                % (action.name, len(non_empty),
+                   "; ".join(label(i) for i in non_empty)))
+            return
+
+        out_of_range = [i for i in non_empty if i >= len(explicit_times)]
+        if out_of_range:
+            self.warn(
+                "Animation '%s': %d frame string(s) DROPPED on export -- "
+                "the action now has fewer keyframes (%d) than when the "
+                "strings were stored (%d). Lost: %s"
+                % (action.name, len(out_of_range), len(explicit_times),
+                   len(stored_strings),
+                   "; ".join(label(i) for i in out_of_range)))
+
     def sample_action(self, action):
         """Sample an action (or rest pose if None) into
         (name, times_ms, {bone: [(pos, quat)]}, binding dict)."""
@@ -584,6 +625,7 @@ class LTAExporter:
             name = "base"
             frames = [scn.frame_current]
             explicit_times = None
+            explicit_strings = None
             binding = {'dims': (16.0, 16.0, 16.0),
                        'translation': (0.0, 0.0, 0.0),
                        'interp-time': 200}
@@ -594,11 +636,13 @@ class LTAExporter:
             # Sampling every frame bloated the export (385 keyframes vs the
             # original 161) and diverged from canonical ModelEdit output.
             explicit_times = action.get('lta_keyframe_times')
+            explicit_strings = action.get('lta_keyframe_strings')
             if explicit_times:
                 # exact original timing: derive the frame for each stored time
                 explicit_times = [float(t) for t in explicit_times]
                 frames = [int(round(t * fps / 1000.0)) for t in explicit_times]
             else:
+                explicit_strings = None  # frame list no longer matches 1:1
                 kf_frames = set()
                 for fc in action.fcurves:
                     for kp in fc.keyframe_points:
@@ -611,6 +655,8 @@ class LTAExporter:
                                         int(round(f1)) + 1, step))
             if not frames:
                 frames = [int(round(f0))]
+            self._check_frame_string_loss(action, explicit_times,
+                                          explicit_strings)
             binding = {
                 'dims': tuple(action.get('lta_dims', (16.0, 16.0, 16.0))),
                 'translation': tuple(action.get('lta_translation',
@@ -656,6 +702,7 @@ class LTAExporter:
         tracks = {b.name: [] for b in self.bones}
         f_start = frames[0]
         times = []
+        strings = []
         try:
             for fi, f in enumerate(frames):
                 scn.frame_set(f)
@@ -680,6 +727,10 @@ class LTAExporter:
                     times.append(int(round(explicit_times[fi])))
                 else:
                     times.append(int(round((f - f_start) * 1000.0 / fps)))
+                if explicit_strings is not None and fi < len(explicit_strings):
+                    strings.append(str(explicit_strings[fi]))
+                else:
+                    strings.append('')
         finally:
             ad.action = prev_action
             if prev_slot is not None and hasattr(ad, "action_slot"):
@@ -713,10 +764,11 @@ class LTAExporter:
         # match canonical ModelEdit output (e.g. baron's 1-frame 'base').
         if len(times) == 1 and explicit_times is None:
             times.append(times[0] + 200)
+            strings.append('')
             for tk in tracks.values():
                 tk.append(tk[0])
 
-        return name, times, tracks, binding
+        return name, times, tracks, binding, strings
 
     # -- writing ----------------------------------------------------------------
 
@@ -734,7 +786,7 @@ class LTAExporter:
         if anims:
             w.open('anim-bindings')
             w.open()
-            for (aname, _times, _tracks, binding) in anims:
+            for (aname, _times, _tracks, binding, _strings) in anims:
                 w.open('anim-binding')
                 w.leaf('name', w.s(aname))
                 w.leaf('dims', w.vec(binding['dims']))
@@ -858,8 +910,8 @@ class LTAExporter:
             self._write_shape(w, shape)
 
         # ---- animsets ----
-        for (aname, times, tracks, _binding) in anims:
-            self._write_animset(w, aname, times, tracks)
+        for (aname, times, tracks, _binding, strings) in anims:
+            self._write_animset(w, aname, times, tracks, strings)
 
         # ---- tools-info ----
         seen = {}
@@ -984,7 +1036,7 @@ class LTAExporter:
             w.line('( )')
         w.close()
 
-    def _write_animset(self, w, name, times, tracks):
+    def _write_animset(self, w, name, times, tracks, strings=None):
         w.open('animset', w.s(name))
 
         w.open('keyframe')
@@ -993,7 +1045,9 @@ class LTAExporter:
         self._write_numbers(w, [str(t) for t in times])
         w.close()
         w.open('values')
-        self._write_numbers(w, ['""'] * len(times))
+        if strings is None:
+            strings = [''] * len(times)
+        self._write_numbers(w, [w.s(s) for s in strings], per_line=8)
         w.close()
         w.close()
         w.close()
@@ -1055,6 +1109,12 @@ class LTAExporter:
             "in %.2fs" % (os.path.basename(self.filepath), len(self.bones),
                           len(shapes), len(sockets), len(anims),
                           time.time() - t0))
+        if self.warnings:
+            self.op.report(
+                {'WARNING'},
+                "%d warning(s) during export -- see above (frame-string "
+                "drops, if any, name the affected animation)."
+                % len(self.warnings))
 
 
 # ---------------------------------------------------------------------------
