@@ -9,10 +9,6 @@
 # to be opened in ModelEdit and compiled to .ltb by ModelPacker, replacing
 # the original Maya exporters.
 
-# IMPORTANT!!!! AT THE CURRENT MOMENT, IMPORT ANIMS FROM ORIGINAL MODEL IN MODELEDIT AFTER YOU EXPORT!!!!!
-# THE ANIMS DON'T SEEM TO ATTACH TO MODEL BUT THEY ARE THERE, SOMETHING I SCREWED UP! TO BE FIXED!
-# Remember to have a triangulated mesh, the plugin doesn't do it.
-
 bl_info = {
     "name": "Export Jupiter LithTech LTA (Model)",
     "author": "",
@@ -23,6 +19,7 @@ bl_info = {
     "category": "Import-Export",
 }
 
+import json
 import os
 import time
 
@@ -36,43 +33,40 @@ from bpy.props import (
 )
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper
-from mathutils import Matrix, Vector, Quaternion
+from mathutils import Matrix, Vector
 
 try:
-    from .coordinates import geo_signature, mat_close
+    from .coordinates import (geo_signature, mat_close, swap_vec, swap_dir,
+                              swap_quat, swap_matrix)
 except ImportError:
-    from coordinates import geo_signature, mat_close
+    from coordinates import (geo_signature, mat_close, swap_vec, swap_dir,
+                             swap_quat, swap_matrix)
 
 
 # ---------------------------------------------------------------------------
 # Coordinate conversion (Blender right-handed Z-up -> LithTech left-handed
-# Y-up). The Y<->Z swap is an involution, so the same conjugation converts
-# both ways; triangle winding is flipped to compensate the handedness flip.
+# Y-up). The Y<->Z swap itself lives ONLY in coordinates.py (single source of
+# truth, shared with the importer) -- these four wrappers just adapt its
+# return values to this file's calling convention: plain tuples, and LTA's
+# (x, y, z, w) quaternion storage order instead of mathutils' (w, x, y, z).
+# Triangle winding is flipped separately to compensate the handedness flip.
 # ---------------------------------------------------------------------------
 
-_C = Matrix(((1, 0, 0, 0),
-             (0, 0, 1, 0),
-             (0, 1, 0, 0),
-             (0, 0, 0, 1)))
-
-
 def vec_to_lt(v, scale=1.0):
-    return (v[0] * scale, v[2] * scale, v[1] * scale)
+    return tuple(swap_vec(v, scale))
 
 
 def dir_to_lt(v):
-    return (v[0], v[2], v[1])
+    return tuple(swap_dir(v))
 
 
 def quat_to_lt(q):
-    # Blender Quaternion (w, x, y, z) -> LT (x, y, z, w)
-    return (-q.x, -q.z, -q.y, q.w)
+    sq = swap_quat(q)  # mathutils order (w, x, y, z)
+    return (sq.x, sq.y, sq.z, sq.w)
 
 
 def mat_to_lt(m, scale=1.0):
-    out = _C @ m @ _C
-    out.translation = out.translation * scale
-    return out
+    return swap_matrix(m, scale)
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +250,19 @@ class LTAExporter:
                       "expects a single root node; consider parenting "
                       "everything under one root bone." % len(roots))
 
+    def _nearest_bone(self, pos_arm):
+        """Name of the exported bone whose rest head sits closest to
+        pos_arm (armature space). Used as the fallback for a vertex with no
+        usable vertex-group weight: pinning it to the nearest bone instead
+        of always the armature root avoids dragging it across the model and
+        stretching every triangle that shares it into a spike."""
+        best_name, best_d = self.bones[0].name, None
+        for b in self.bones:
+            d = (b.rest_arm.translation - pos_arm).length_squared
+            if best_d is None or d < best_d:
+                best_name, best_d = b.name, d
+        return best_name
+
     # -- mesh extraction ----------------------------------------------------
 
     def extract_meshes(self):
@@ -312,6 +319,7 @@ class LTAExporter:
                 inf_index = {}
                 weights = []
                 limit = self.o.max_weights
+                lost_verts = 0
                 for v in mesh.vertices:
                     pairs = []
                     for ge in v.groups:
@@ -323,8 +331,14 @@ class LTAExporter:
                         pairs = pairs[:limit]
                     total = sum(w for _n, w in pairs)
                     if total <= 0.0:
-                        root = self.bones[0].name
-                        pairs, total = [(root, 1.0)], 1.0
+                        # No usable weight at all (no groups, or only groups
+                        # that don't match a bone). Pinning this to the
+                        # armature root would drag it across the model and
+                        # stretch every triangle sharing it into a spike, so
+                        # use whichever exported bone sits closest instead.
+                        nearest = self._nearest_bone(to_arm @ v.co)
+                        pairs, total = [(nearest, 1.0)], 1.0
+                        lost_verts += 1
                     out = []
                     for nm, w in pairs:
                         if nm not in inf_index:
@@ -333,6 +347,13 @@ class LTAExporter:
                         out.append((inf_index[nm], w / total))
                     weights.append(out)
                 deformer = (influences, weights)
+                if lost_verts:
+                    self.warn(
+                        "Mesh '%s': %d vertex(es) had no usable vertex-group "
+                        "weight (missing, zero, or named after no exported "
+                        "bone) and were pinned to the nearest bone by rest "
+                        "position instead of the armature root."
+                        % (obj.name, lost_verts))
 
         # UVs ---------------------------------------------------------------
         uv_layer = mesh.uv_layers.active if self.o.export_uvs else None
@@ -812,6 +833,46 @@ class LTAExporter:
             w.close()
             w.close()
 
+        # Typ A LOD: re-emit (lod-groups ...) exactly as captured at import
+        # (lta_lod_groups, written by builder_import.apply_model_metadata),
+        # keeping only the group entries whose shapes are still being
+        # exported. A group that lost some (but not all) of its shapes keeps
+        # the remaining ones with their original distances truncated to
+        # match -- ModelEdit needs dists and shapes the same length.
+        if getattr(self.o, 'write_lod_groups', True):
+            try:
+                stored_groups = json.loads(
+                    self.arm_obj.get('lta_lod_groups') or '[]')
+            except Exception:
+                stored_groups = []
+            shape_names = {s['name'] for s in shapes}
+            kept_groups = []
+            for g in stored_groups:
+                kept = [s for s in g.get('shapes', []) if s in shape_names]
+                if kept:
+                    dists = list(g.get('dists', []))[:len(kept)]
+                    kept_groups.append((g.get('name', ''), dists, kept))
+                    if len(kept) != len(g.get('shapes', [])):
+                        self.warn(
+                            "LOD group '%s': %d of %d shape(s) missing from "
+                            "this export; re-emitting only the ones present."
+                            % (g.get('name', ''), len(kept),
+                               len(g.get('shapes', []))))
+            if kept_groups:
+                w.open('lod-groups')
+                w.open()
+                for gname, dists, gshapes in kept_groups:
+                    w.open('create-lod-group', w.s(gname))
+                    w.open('lod-dists')
+                    w.line('(%s )' % ' '.join(w.f(d) for d in dists))
+                    w.close()
+                    w.open('shapes')
+                    w.line('(%s )' % ' '.join(w.s(s) for s in gshapes))
+                    w.close()
+                    w.close()
+                w.close()
+                w.close()
+
         for shape in shapes:
             if shape['deformer']:
                 influences, weights = shape['deformer']
@@ -848,14 +909,69 @@ class LTAExporter:
                     lodw[o.name] = float(o.get('lt_lod_weight', 1.0) or 1.0)
                 except Exception:
                     lodw[o.name] = 1.0
+
+            # dists / tri-%: real values when available, else the original
+            # hero (baron_action.abc) constants this block always used --
+            # kept as the fallback so behaviour is unchanged when we don't
+            # have real data (never a partial mix of one real + one fake
+            # list). dists comes from model.lod_distances (ABC only,
+            # stashed as 'lta_lod_distances' -- confirmed a real, global,
+            # structured binary field). tri-% has no stored field anywhere
+            # -- derived here from the actual multi-LOD sibling objects
+            # ("Import All LOD Levels"), against the WHOLE MODEL's summed
+            # triangle count, not a per-piece ratio. That "whole model, not
+            # per piece" rule is confirmed against the engine's own
+            # BuildLODs() (newgenlod.cpp, user-supplied): it greedily
+            # collapses edges across every piece at once against one
+            # combined triangle-count target, weighted per piece by
+            # piece-priority (GetPieceWeight()) -- which is exactly
+            # lt_lod_weight / piece-priorities below, already wired.
+            dists = tri_percent = None
+            stored_dists = None
+            try:
+                parsed = json.loads(self.arm_obj.get('lta_lod_distances') or 'null')
+                if isinstance(parsed, list) and parsed:
+                    stored_dists = [float(d) for d in parsed]
+            except Exception:
+                stored_dists = None
+
+            if stored_dists:
+                def _tri_count(o):
+                    o.data.calc_loop_triangles()
+                    return len(o.data.loop_triangles)
+
+                base_tris = {o.name: _tri_count(o) for o in self.mesh_objs
+                             if o.name in lodw}
+                total_base = sum(base_tris.values())
+                if total_base > 0:
+                    derived = []
+                    for i in range(1, len(stored_dists) + 1):
+                        total_lod = 0
+                        have_any_sibling = False
+                        for name, n0 in base_tris.items():
+                            sib = bpy.data.objects.get('%s_lod%d' % (name, i))
+                            if sib is not None and sib.type == 'MESH':
+                                total_lod += _tri_count(sib)
+                                have_any_sibling = True
+                            else:
+                                total_lod += n0  # no lower LOD for this shape -> unchanged
+                        if not have_any_sibling:
+                            derived = None
+                            break
+                        derived.append(total_lod / total_base)
+                    if derived:
+                        dists, tri_percent = stored_dists, derived
+
+            if dists is None or tri_percent is None:
+                dists = [300.0, 600.0, 1000.0, 1500.0]
+                tri_percent = [0.799414, 0.600293, 0.399707, 0.250366]
+
             w.open('set-repl-lod-original')
             w.open('tri-%')
-            w.line('(%s )' % ' '.join(w.f(x) for x in
-                   (0.799414, 0.600293, 0.399707, 0.250366)))
+            w.line('(%s )' % ' '.join(w.f(x) for x in tri_percent))
             w.close()
             w.open('dists')
-            w.line('(%s )' % ' '.join(w.f(x) for x in
-                   (300.0, 600.0, 1000.0, 1500.0)))
+            w.line('(%s )' % ' '.join(w.f(x) for x in dists))
             w.close()
             w.open('piece-priorities')
             w.open()
@@ -1249,6 +1365,14 @@ class EXPORT_SCENE_OT_lta_jupiter(Operator, ExportHelper):
                     "from an LTA source is always preserved regardless",
         default=False)
 
+    write_lod_groups: BoolProperty(
+        name="Write LOD Groups (Typ A)",
+        description="Re-emit (lod-groups ...) -- real, separate LOD meshes "
+                    "grouped by distance -- from what was captured at "
+                    "import ('Import LOD Groups'), for whichever of those "
+                    "shapes are still present in this export",
+        default=True)
+
     write_preserved: BoolProperty(
         name="Write Preserved LTA Blocks",
         description="Re-emit anim-weightsets, child models, LOD and OBB "
@@ -1307,6 +1431,7 @@ class EXPORT_SCENE_OT_lta_jupiter(Operator, ExportHelper):
         box.prop(self, "export_sockets")
         box.prop(self, "write_node_flags")
         box.prop(self, "write_preserved")
+        box.prop(self, "write_lod_groups")
         box.prop(self, "write_lod_recipe")
         box.prop(self, "global_radius")
 

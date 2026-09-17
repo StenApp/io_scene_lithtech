@@ -195,7 +195,17 @@ def _quat_xyzw(vals):
 
 # ---------------------------------------------------------------------------
 class LTAModelReader(object):
-    def from_file(self, path):
+    def from_file(self, path, parse_lod_groups=True, parse_lod_recipe=True):
+        """parse_lod_groups: Typ A -- (lod-groups (create-lod-group ...)),
+        real, fully separate LOD meshes grouped by distance. Parsed
+        structurally into model.lod_groups when True; skipped (and lost,
+        same as before this option existed) when False.
+
+        parse_lod_recipe: Typ B -- (set-repl-lod-original ...), a single
+        source mesh plus a tri-%/distance recipe ModelEdit regenerates LODs
+        from. Captured verbatim into model.preserved_raw['lta_lod'] when
+        True (as before); skipped when False.
+        """
         with open(path, 'r', errors='replace') as f:
             src_text = f.read()
         tree, spans = parse_lta_spans(src_text)
@@ -203,12 +213,15 @@ class LTAModelReader(object):
         model = Model()
         model.name = os.path.splitext(os.path.basename(path))[0]
         model.version = 0  # LTA carries no binary version
+        model.lod_groups = []   # [{'name', 'dists', 'shapes'}, ...] (Typ A)
 
         self._tree = tree
         self._spans = spans
         self._src_text = src_text
         self._world = {}          # node name -> world Matrix (raw LT)
         self._name_to_index = {}  # node name -> global index
+        self._parse_lod_groups = parse_lod_groups
+        self._parse_lod_recipe = parse_lod_recipe
 
         # model-level coord-frame-type sets the default for all transforms
         # (default GLOBAL; only explicit 'local' composes the hierarchy)
@@ -309,11 +322,42 @@ class LTAModelReader(object):
             elif kind in ('add-childmodels', 'child-model'):
                 raw['lta_childmodels'].append(_verbatim(cmd))
             elif kind == 'set-repl-lod-original':
-                raw['lta_lod'].append(_verbatim(cmd))
+                if self._parse_lod_recipe:
+                    raw['lta_lod'].append(_verbatim(cmd))
+            elif kind == 'lod-groups':
+                if self._parse_lod_groups:
+                    self._read_lod_groups(cmd, model)
             elif kind in ('add-node-obb-list', 'add-node-obb'):
                 raw['lta_obb'].append(_verbatim(cmd))
 
         model.preserved_raw = {k: '\n'.join(v) for k, v in raw.items() if v}
+
+    def _read_lod_groups(self, cmd, model):
+        """Typ A LOD: (lod-groups ( (create-lod-group "name"
+        (lod-dists (d0 d1 ...) ) (shapes ("s0" "s1" ...) ) ) ... ) ).
+
+        Each group lists real, separately-defined shapes (already read as
+        their own Pieces by _read_pieces) at increasing distance. Stored
+        structurally on the model so the exporter can re-emit it verbatim
+        for the shapes that still exist -- this does not change how those
+        shapes are built in Blender (still one object per shape, as today)."""
+        for g in find_all(cmd, 'create-lod-group'):
+            name = first_string(g) or ''
+            dists_node = shallow_find(g, 'lod-dists')
+            dists = floats(atoms_of(dists_node)[1:]) if dists_node else []
+            if not dists and dists_node and lists_of(dists_node):
+                dists = floats(lists_of(dists_node)[0])
+            shapes_node = shallow_find(g, 'shapes')
+            shape_names = []
+            if shapes_node:
+                for c in shapes_node[1:]:
+                    if isinstance(c, list):
+                        shape_names.extend(x for x in c if isinstance(x, str))
+                    elif isinstance(c, str):
+                        shape_names.append(c)
+            if shape_names:
+                model.lod_groups.append(
+                    {'name': name, 'dists': dists, 'shapes': shape_names})
 
     # -- skeleton -----------------------------------------------------------
     def _read_nodes(self, model):

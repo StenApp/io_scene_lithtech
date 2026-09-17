@@ -251,9 +251,13 @@ class PS2LTBModelReader(object):
         node = Node()
         node.name = self._read_string(f)
         node.bind_matrix = self._read_matrix(f)
-        f.seek(4, 1) 
+        f.seek(4, 1)  # hashedNodeName, unused
         node.child_count = unpack('I', f)[0]
         node.index = unpack('H', f)[0]
+        # Trailing "short Unk" per the user-supplied .bt template -- not
+        # confirmed as node flags (different width than the 1-byte flags
+        # field in ABC-PC/LTB-PC, and the template's own author didn't
+        # identify it either), so left unread rather than guessed at.
         f.seek(2, 1)
         return node
 
@@ -298,12 +302,15 @@ class PS2LTBModelReader(object):
         
         return keyframe
 
-    def _read_animation(self, f):
+    def _read_animation(self, f, model=None):
         animation = Animation()
         animation.name = "Animation_%d" % self._animations_processed
-        animation.extents = self._read_vector(f)
-        
-        unknown_vector_maybe = self._read_vector(f)
+        animation.extents = self._read_vector(f)          # "Dims" in the .bt template
+
+        translation = self._read_vector(f)                 # "Translation" in the .bt template;
+                                                             # was read into a throwaway local and
+                                                             # never stored anywhere -- lost on every
+                                                             # PS2 import until this fix.
         hashed_string = unpack('I', f)[0]
         animation.interpolation_time = unpack('I', f)[0]
         animation.keyframe_count = unpack('I', f)[0]
@@ -313,14 +320,28 @@ class PS2LTBModelReader(object):
             start_marker = unpack('I', f)[0]
             animation.node_keyframe_transforms.append(
                 [self._read_transform(f) for _ in range(animation.keyframe_count)])
-                
+
         self._animations_processed += 1
-        
+
         looked_up_value = self._hasher.lookup_hash(hashed_string, "animations")
-        
+
         if (looked_up_value != None):
             animation.name = looked_up_value
-            
+
+        # Confirmed against the user-supplied .bt template: unlike PC LTB,
+        # PS2 has no separate, trailing (name/extents/origin) AnimBinding
+        # section -- Dims+Translation are read directly inside each
+        # Animation entry, and the template's own parsing ends right after
+        # Sockets with no further section. So the anim-binding (dims/
+        # translation, used for round-trip export metadata) is synthesized
+        # here per animation instead of read from a trailing block.
+        if model is not None:
+            binding = AnimBinding()
+            binding.name = animation.name
+            binding.extents = animation.extents
+            binding.origin = translation
+            model.anim_bindings.append(binding)
+
         return animation
     
     def _read_socket(self, f):
@@ -1088,7 +1109,7 @@ class PS2LTBModelReader(object):
                 f.seek(animation_offset)
                 local_animation_count = unpack('I', f)[0]
                 if local_animation_count > 0 and local_animation_count < 1000:  # Sanity check
-                    model.animations = [self._read_animation(f) for _ in range(local_animation_count)]
+                    model.animations = [self._read_animation(f, model) for _ in range(local_animation_count)]
                 else:
                     print(f"Skipping animations: count {local_animation_count} seems invalid")
             except Exception as e:
@@ -1105,5 +1126,16 @@ class PS2LTBModelReader(object):
             except Exception as e:
                 print(f"Error reading sockets: {e}")
                 model.sockets = []
-            
+
+            # NOTE (correction of a previous fix): there is no separate
+            # trailing AnimBinding section here like PC LTB has after its
+            # own Sockets block. That was an unverified assumption in an
+            # earlier version of this reader ("if a real PS2 file turns out
+            # to lay them out differently..."). Checked against the
+            # user-supplied .bt template: its own parsing ends right after
+            # Sockets, with no further section, and each Animation entry
+            # already carries its own Dims/Translation inline. anim-bindings
+            # are now synthesized from that data in _read_animation() above
+            # instead of read from a (nonexistent) trailing block here.
+
         return model

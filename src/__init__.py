@@ -59,17 +59,46 @@ class IMPORT_OT_lithtech_clean(bpy.types.Operator, ImportHelper):
         description="Import each animation as its own Action on a separate NLA track",
         default=True,
     )
+    import_lod_groups: BoolProperty(
+        name="Import LOD Groups (.lta)",
+        description="Parse (lod-groups ...) -- real, separate meshes grouped "
+                    "by distance -- into round-trip metadata. LTA only; "
+                    "ignored for .abc/.ltb",
+        default=True,
+    )
+    import_lod_recipe: BoolProperty(
+        name="Import LOD Recipe (.lta)",
+        description="Capture (set-repl-lod-original ...) -- the tri-%/"
+                    "distance recipe ModelEdit regenerates LODs from a "
+                    "single mesh with -- for verbatim round-trip. LTA only; "
+                    "ignored for .abc/.ltb",
+        default=True,
+    )
+    import_lod_levels: BoolProperty(
+        name="Import All LOD Levels",
+        description="Build every LOD level, not just the highest-detail one "
+                    "(mirrors the export-side LOD checkboxes). For .abc/.ltb "
+                    "this is piece.lods[1:]; for .lta it's the lower-detail "
+                    "sibling shapes named by a (lod-groups ...) block. Extra "
+                    "levels are built but hidden by default. Off keeps the "
+                    "old behaviour: only the highest-detail level.",
+        default=True,
+    )
 
     def execute(self, context):
         import os
         try:
-            model = reader_dispatch.read_model(self.filepath)
+            model = reader_dispatch.read_model(
+                self.filepath,
+                parse_lod_groups=self.import_lod_groups,
+                parse_lod_recipe=self.import_lod_recipe)
         except Exception as e:
             self.report({'ERROR'}, "Read failed: %s" % e)
             return {'CANCELLED'}
         try:
             name = os.path.splitext(os.path.basename(self.filepath))[0]
-            arm_obj = builder_import.build_model(model, name)
+            arm_obj = builder_import.build_model(
+                model, name, import_lod_levels=self.import_lod_levels)
         except Exception as e:
             self.report({'ERROR'}, "Build failed: %s" % e)
             return {'CANCELLED'}

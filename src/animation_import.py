@@ -34,6 +34,54 @@ def _frame_for(time_ms, fps):
     return round(time_ms * fps / 1000.0)
 
 
+def _bind_action_slot(action, id_data):
+    """Blender 4.4+ split Action into 'slots': one Action can now carry
+    several independent animations, each bound to one ID. Without binding a
+    slot -- on animation_data.action_slot AND separately on every NLA strip
+    that uses this action -- the action exists and looks fine in the data-
+    blocks list, but does not actually drive anything; Blender silently
+    shows no animation, no error. Pre-4.4 Blender (this addon's stated
+    minimum is 4.1) has no Action.slots at all, so this is a no-op there.
+
+    UNVERIFIED against a real Blender 4.4+ install (not available in this
+    environment) -- API names (Action.slots.new(id_type=..., name=...),
+    id_type='OBJECT', .action_slot on animation_data/NLA strip) are best-
+    effort from the documented 4.4 Action/slot redesign, not run-tested.
+    Defensive by design: every step is guarded, so on an API mismatch this
+    degrades to the pre-4.4 behaviour (action still created, just possibly
+    unbound) instead of raising.
+    """
+    slots = getattr(action, 'slots', None)
+    if slots is None:
+        return None  # pre-4.4 Blender: actions don't have slots at all
+    id_type = getattr(id_data, 'id_type', 'OBJECT')
+    slot = None
+    try:
+        for s in slots:
+            if getattr(s, 'target_id_type', id_type) == id_type:
+                slot = s
+                break
+        if slot is None:
+            slot = slots.new(id_type=id_type, name=id_data.name)
+    except Exception as e:
+        print("  [slot] could not get/create action slot for '%s': %s"
+              % (action.name, e))
+        return None
+    return slot
+
+
+def _set_action_slot(target, slot, label):
+    """Assign `slot` to animation_data.action_slot or an NLA strip's
+    action_slot. Both assignment points are needed (see _bind_action_slot);
+    guarded the same way, for the same reason."""
+    if slot is None:
+        return
+    try:
+        target.action_slot = slot
+    except Exception as e:
+        print("  [slot] could not bind action_slot on %s: %s" % (label, e))
+
+
 def import_animations(model, arm_obj, fps=None):
     anims = getattr(model, 'animations', [])
     if not anims:
@@ -83,7 +131,9 @@ def import_animations(model, arm_obj, fps=None):
 
         action = bpy.data.actions.new(name=anim.name)
         action.use_fake_user = True            # survive even when not active
+        slot = _bind_action_slot(action, arm_obj)
         ad.action = action
+        _set_action_slot(ad, slot, "animation_data (action '%s')" % anim.name)
 
         # stash anim-binding props the (v1) exporter reads back; defaults match v1
         dims, trans = bindings.get(anim.name, (None, None))
@@ -143,7 +193,8 @@ def import_animations(model, arm_obj, fps=None):
             start = int(action.frame_range[0])
             track = ad.nla_tracks.new()
             track.name = anim.name
-            track.strips.new(anim.name, start, action)
+            strip = track.strips.new(anim.name, start, action)
+            _set_action_slot(strip, slot, "NLA strip '%s'" % anim.name)
             track.mute = True
         except Exception as e:
             print("  [nla] '%s' strip not created: %s" % (anim.name, e))

@@ -49,11 +49,15 @@ def detect_format(path):
     return {'.abc': 'abc'}.get(os.path.splitext(path)[1].lower(), 'unknown')
 
 
-def read_model(path):
-    """Detect format and return a populated abc.py:Model."""
+def read_model(path, **lta_options):
+    """Detect format and return a populated abc.py:Model.
+
+    lta_options (parse_lod_groups, parse_lod_recipe) only apply to .lta --
+    the binary readers take no options and are called without them.
+    """
     fmt = detect_format(path)
     if fmt == 'lta':
-        return LTAModelReader().from_file(path)
+        return LTAModelReader().from_file(path, **lta_options)
     if fmt == 'abc':
         return ABCModelReader().from_file(path)
     if fmt == 'ltb_pc':
