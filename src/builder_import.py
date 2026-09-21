@@ -323,6 +323,18 @@ def check_bounds_alignment(model, built_objs):
 
 # --------------------------------------------------------------------------
 def build_sockets(model, arm_obj, collection):
+    # build_armature() hat die Bones gerade erst erzeugt und ist per
+    # mode_set(OBJECT) aus dem Edit-Mode zurueck -- ohne ein explizites
+    # Depsgraph-Update ist die Pose-Bone-Matrix, auf der parent_bone unten
+    # aufbaut, potenziell noch nicht aktuell. VERMUTUNG (mangels Blender in
+    # dieser Umgebung nicht selbst nachstellbar, aber ein bekanntes
+    # Blender-Scripting-Problem): ohne dieses Update wird matrix_basis unten
+    # gegen eine veraltete Parent-Matrix aufgeloest, und beim tatsaechlichen
+    # Rendern (mit dann korrekter Matrix) verschiebt sich das Socket-Empty
+    # zusaetzlich um den ganzen Bone-Transform -- am staerksten sichtbar bei
+    # Bones weit vom Ursprung (Arme/Beine), kaum merkbar nahe der Wirbelsaeule.
+    # Das deckt sich mit den beobachteten "Spikes" an Schulter/Huefte.
+    bpy.context.view_layer.update()
     for sock in getattr(model, 'sockets', []):
         if sock.node_index >= len(model.nodes):
             continue

@@ -135,6 +135,37 @@ class BoneInfo:
         self.index = index
 
 
+# ---------------------------------------------------------------------------
+# Bone export filter (rigs like Rigify mix game-relevant deform bones with
+# animator-only control/mechanism bones -- exporting every bone bloats the
+# LTA with nodes ModelEdit/the engine never uses). A filtered-out bone is
+# skipped over, not cut: gather_bones() re-parents its kept descendants to
+# the nearest kept ancestor via this, so the hierarchy stays connected.
+# ---------------------------------------------------------------------------
+
+def _bone_in_collection(bone, name):
+    """True when the bone belongs to the named bone collection."""
+    name = str(name or '').strip()
+    if not name:
+        return False
+    try:
+        return any(getattr(c, 'name', '') == name for c in bone.collections)
+    except Exception:
+        return False
+
+
+def _bone_keep(bone, mode, collection):
+    """Does this bone survive the export filter?"""
+    mode = str(mode or 'ALL').upper()
+    if mode == 'DEFORM':
+        return bool(getattr(bone, 'use_deform', True))
+    if mode == 'SELECTED':
+        return bool(getattr(bone, 'select', False))
+    if mode == 'COLLECTION':
+        return _bone_in_collection(bone, collection)
+    return True
+
+
 class LTAExporter:
 
     def __init__(self, operator, context, filepath, opts):
@@ -205,11 +236,48 @@ class LTAExporter:
 
     def gather_bones(self):
         arm = self.arm_obj.data
-        index = 0
-        ordered = []
+        all_bones = list(arm.bones)
 
-        def visit(bone, parent_info):
-            nonlocal index
+        mode = getattr(self.o, 'bone_filter_mode', 'ALL')
+        collection = getattr(self.o, 'bone_filter_collection', '')
+        root_name = str(getattr(self.o, 'bone_filter_root', '') or '').strip()
+
+        root_bone = arm.bones.get(root_name) if root_name else None
+        if root_name and root_bone is None:
+            self.warn("Root bone '%s' not found in armature '%s'; using "
+                      "the armature's own root bone(s) instead."
+                      % (root_name, self.arm_obj.name))
+
+        keep = {b.name for b in all_bones if _bone_keep(b, mode, collection)}
+        if root_bone is not None:
+            # Narrow to the chosen root's own subtree (how a rig with
+            # several independent bone trees -- e.g. a Rigify control root
+            # next to the deform root -- gets reduced to the single root
+            # LithTech expects). The chosen root always survives, whether
+            # or not it itself passes the DEFORM/SELECTED/COLLECTION filter.
+            subtree = set()
+
+            def mark(b):
+                subtree.add(b.name)
+                for kid in b.children:
+                    mark(kid)
+
+            mark(root_bone)
+            keep &= subtree
+            keep.add(root_bone.name)
+
+        if not keep:
+            self.warn("Bone filter '%s' matched no bones on '%s'; "
+                      "exporting the whole armature instead."
+                      % (mode, self.arm_obj.name))
+            keep = {b.name for b in all_bones}
+        elif len(keep) != len(all_bones):
+            self.warn("Bone filter kept %d of %d bone(s) on '%s' (mode=%s)."
+                      % (len(keep), len(all_bones), self.arm_obj.name, mode))
+
+        index = 0
+
+        def rest_matrix(bone):
             # prefer the EXACT rest stored at import over Blender's reconstructed
             # bone.matrix_local (which drifts and collapses the skinned mesh).
             # Prefer the EXACT bind matrix stored at import over Blender's
@@ -229,26 +297,36 @@ class LTAExporter:
                     bl = Matrix([[baseline[r * 4 + c] for c in range(4)]
                                  for r in range(4)])
                     moved = not mat_close(live, bl)
-                rest = live if moved else rest_stored
-            else:
-                rest = live
-            info = BoneInfo(bone.name, parent_info, rest, index)
-            index += 1
-            self.bones.append(info)
-            self.bone_by_name[bone.name] = info
-            for c in bone.children:
-                visit(c, info)
+                return live if moved else rest_stored
+            return live
 
-        roots = [b for b in arm.bones if b.parent is None]
-        if not roots:
+        def visit(bone, parent_info):
+            nonlocal index
+            info = None
+            if bone.name in keep:
+                info = BoneInfo(bone.name, parent_info, rest_matrix(bone), index)
+                index += 1
+                self.bones.append(info)
+                self.bone_by_name[bone.name] = info
+            # A filtered-out bone is skipped over, not cut: pass the
+            # UNCHANGED parent_info down to its children, so a kept
+            # descendant re-parents to the nearest kept ancestor instead of
+            # being dropped along with it.
+            for c in bone.children:
+                visit(c, info if info is not None else parent_info)
+
+        starts = [root_bone] if root_bone is not None else \
+            [b for b in all_bones if b.parent is None]
+        if not starts:
             raise ExportError("Armature '%s' has no bones." %
                               self.arm_obj.name)
-        for r in roots:
+        for r in starts:
             visit(r, None)
-        if len(roots) > 1:
+        if root_bone is None and len(starts) > 1:
             self.warn("Armature has %d root bones. ModelEdit generally "
                       "expects a single root node; consider parenting "
-                      "everything under one root bone." % len(roots))
+                      "everything under one root bone, or set a Root Bone "
+                      "in the export options." % len(starts))
 
     def _nearest_bone(self, pos_arm):
         """Name of the exported bone whose rest head sits closest to
@@ -1327,6 +1405,41 @@ class EXPORT_SCENE_OT_lta_jupiter(Operator, ExportHelper):
                     "(name prefix 's_' is stripped)",
         default=True)
 
+    bone_filter_mode: EnumProperty(
+        name="Bones",
+        description="Which armature bones become LithTech nodes. A "
+                    "filtered-out bone is skipped, not cut: its kept "
+                    "children re-parent to the nearest kept ancestor, so "
+                    "the hierarchy stays connected. Useful for rigs (e.g. "
+                    "Rigify) that mix game-relevant deform bones with "
+                    "animator-only control/mechanism bones",
+        items=(('ALL', "All Bones",
+                "Export every bone in the armature (previous behaviour)"),
+               ('DEFORM', "Deform Bones Only",
+                "Export only bones with the Deform checkbox enabled "
+                "(Rigify's DEF-* bones)"),
+               ('SELECTED', "Selected Bones",
+                "Export only bones currently selected in the armature"),
+               ('COLLECTION', "Bone Collection",
+                "Export only bones in the named bone collection")),
+        default='ALL')
+
+    bone_filter_collection: StringProperty(
+        name="Collection",
+        description="Bone collection to export, when Bones is set to "
+                    "'Bone Collection'",
+        default="")
+
+    bone_filter_root: StringProperty(
+        name="Root Bone",
+        description="Bone to export as the single hierarchy root, "
+                    "together with its own kept descendants only. Also "
+                    "fixes rigs with several independent root bones (e.g. "
+                    "a Rigify control root next to the deform root) by "
+                    "picking the one LithTech should use. Leave empty to "
+                    "use the armature's own root bone(s)",
+        default="")
+
     anim_mode: EnumProperty(
         name="Animations",
         items=(('ALL', "All Actions",
@@ -1417,6 +1530,14 @@ class EXPORT_SCENE_OT_lta_jupiter(Operator, ExportHelper):
         sub = box.column()
         sub.enabled = self.export_weights
         sub.prop(self, "max_weights")
+
+        box = layout.box()
+        box.label(text="Bones", icon='BONE_DATA')
+        box.prop(self, "bone_filter_mode")
+        sub = box.column()
+        sub.enabled = self.bone_filter_mode == 'COLLECTION'
+        sub.prop(self, "bone_filter_collection")
+        box.prop(self, "bone_filter_root")
 
         box = layout.box()
         box.label(text="Animation", icon='ARMATURE_DATA')

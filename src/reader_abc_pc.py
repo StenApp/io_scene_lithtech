@@ -172,20 +172,26 @@ class ABCModelReader(object):
         weight_set.node_weights = [unpack('f', f)[0] for _ in range(node_count)]
         return weight_set
 
-    def from_file(self, path):
+    def from_file(self, path, start_offset=0):
+        # start_offset: normal standalone .abc files start the section scan
+        # at byte 0 ("Header" is the very first section). DHNP wraps an
+        # otherwise-identical ABC body inside an outer LTB container
+        # (LTBHeader-string + LTB_Header); reader_ltb_dhnp.py passes the
+        # size of that wrapper here so the exact same section-scan loop
+        # below can be reused unchanged for both cases.
         model = Model()
         model.name = os.path.splitext(os.path.basename(path))[0]
-        
+
         filename = os.path.basename(path)
-    
+
         print(f"\n{'='*60}")
         print(f"LOADING MODEL: {filename}")
         print(f"Format: Lithtech ABC (PC)")
         print(f"{'='*60}\n")
-    
-        
+
+
         with open(path, 'rb') as f:
-            next_section_offset = 0
+            next_section_offset = start_offset
             while next_section_offset != -1:
                 f.seek(next_section_offset)
                 section_name = self._read_string(f)
@@ -199,7 +205,6 @@ class ABCModelReader(object):
                     self._node_count = unpack('I', f)[0]
                     f.seek(20, 1)
                     self._lod_count = unpack('I', f)[0]
-                    self._lod_dist_count = self._lod_count
                     f.seek(4, 1)
                     self._weight_set_count = unpack('I', f)[0]
                     f.seek(8, 1)
@@ -214,10 +219,18 @@ class ABCModelReader(object):
                     model.command_string = self._read_string(f)
                     model.internal_radius = unpack('f', f)[0]
 
-                    if self._version == 108:
-                        self._lod_dist_count = unpack('I', f)[0]
-                    else:
-                        f.seek(4, 1)
+                    # BESTAETIGT (2026-09, ABC_V9-13.bt byte-exakt gegen 8
+                    # echte Dateien ueber v9/v11/v12/v13 geprueft, Sten):
+                    # LODDistanceCount ist bei JEDER Version ein echtes,
+                    # eigenstaendig im File stehendes Feld -- nicht aus
+                    # LODCount ableitbar. Bisher wurde es fuer Version != 108
+                    # per f.seek(4,1) uebersprungen und stattdessen
+                    # self._lod_dist_count = self._lod_count (= LODCount)
+                    # angenommen; der reale Wert entspricht in allen
+                    # Testdateien LODCount-1 (Distanz-Schwellen liegen
+                    # ZWISCHEN Stufen), war also off-by-one. Jetzt fuer alle
+                    # Versionen gleich: echt lesen statt ableiten.
+                    self._lod_dist_count = unpack('I', f)[0]
 
                     f.seek(60, 1)
                     model.lod_distances = [unpack('f', f)[0] for _ in range(self._lod_dist_count)]

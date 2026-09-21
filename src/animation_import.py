@@ -126,7 +126,14 @@ def import_animations(model, arm_obj, fps=None):
 
     made = 0
     for anim in anims:
-        if not anim.keyframe_count:
+        # anim.keyframes ist bei JEDEM Reader garantiert befuellt; das separate
+        # Attribut anim.keyframe_count wird nur von manchen Readern (LTB PC/PS2/
+        # DHNP, ABC PC, LTA) explizit gesetzt -- der ABC-v6-Reader setzt es nie
+        # (er braucht dafuer nur eine lokale Variable beim Parsen), wodurch
+        # anim.keyframe_count fuer v6-Modelle mit AttributeError abbrach
+        # ("Animations failed: 'Animation' object has no attribute
+        # 'keyframe_count'"). len(anim.keyframes) ist reader-unabhaengig korrekt.
+        if not anim.keyframes:
             continue
 
         action = bpy.data.actions.new(name=anim.name)
