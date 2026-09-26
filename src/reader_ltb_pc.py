@@ -800,4 +800,29 @@ class PCLTBModelReader(object):
                 except Exception:
                     pass
 
+            # BESTAETIGT (2026-09, Sten, gegen PLAYER_ACTION.LTB v23, plain
+            # LTB PC, 2 echte ChildModels [Deathbase.ltb, playerbase.ltb]):
+            # dieselbe ChildModelAnimBindings-Erweiterung wie bei ABC PC/
+            # DHNP-D3D gilt auch hier -- ein weiterer AnimBindingHeader-
+            # Block (uint32 Count + Count*AnimBinding) PRO ECHTEM
+            # ChildModel, direkt nach der internen AnimBindings-Section,
+            # ohne eigenen Section-Marker. Anders als bei ABC/DHNP-D3D
+            # (wo model.child_models einen leeren Platzhalter-Eintrag an
+            # Index 0 mitfuehrt) enthaelt model.child_models hier bereits
+            # AUSSCHLIESSLICH echte, externe ChildModels (das Selbst-Model
+            # ist oben schon per "child_model_count - 1" herausgerechnet) --
+            # deshalb hier KEIN "-1" mehr, sondern ein Block pro Eintrag.
+            # Byte-exakt verifiziert: PLAYER_ACTION.LTB hatte vorher 8
+            # ungelesene Byte bis EOF uebrig (2 ChildModels * 4 Byte
+            # Count-Feld, beide =0 -- keine befuellten Bindings in dieser
+            # Datei, aber Anzahl/Groesse der Blocks stimmt exakt, 0 Byte
+            # Rest). PLAYERBASE.LTB (0 echte ChildModels) hatte schon vorher
+            # exakt 0 Byte Rest -- passt ebenfalls (extra_count=0).
+            model.child_model_anim_bindings = []
+            extra_count = len(model.child_models)
+            for _ in range(extra_count):
+                cm_binding_count = unpack('I', f)[0]
+                model.child_model_anim_bindings.append(
+                    [self._read_anim_binding(f) for _ in range(cm_binding_count)])
+
             return model

@@ -100,14 +100,22 @@ class ABCModelReader(object):
         return node
 
     def _read_transform(self, f):
+        # Plain "Transform" struct (ABC_V9-134.bt): Location + Rotation,
+        # NOTHING else, for ANY version. This is what ChildModel.Transforms
+        # uses. It used to also get the v13 extra-8-bytes skip below
+        # (copy-pasted from _read_anim_transform's needs) -- that was WRONG:
+        # the .bt defines two DISTINCT structs, plain Transform (used here)
+        # and AnimTransform (Location+Rotation+`if(g_Version>=13): float
+        # Unknown[2]`, used only by Animation's KeyFrameTransform.Transforms).
+        # Confirmed structural bug for any v13 ABC file with real
+        # ChildModels: this function was consuming 8 extra bytes it should
+        # never have, misaligning every ChildModel.Transform after the
+        # first. Fixed by moving that skip into _read_anim_transform only,
+        # which is the sole other caller of this method (2026-09, Sten,
+        # against ABC_V9-132.bt/ABC_V9-134.bt).
         transform = Animation.Keyframe.Transform()
         transform.location = self._read_vector(f)
         transform.rotation = self._read_quaternion(f)
-
-        # Two unknown floats!
-        if self._version == 13:
-            f.seek(8, 1)
-
         return transform
 
     def _read_child_model(self, f):
@@ -124,7 +132,18 @@ class ABCModelReader(object):
         return keyframe
 
     def _read_anim_transform(self, f):
+        # AnimTransform struct (ABC_V9-134.bt): plain Transform PLUS, only
+        # for v13, two extra unknown floats (`if(g_Version>=13):
+        # float Unknown[2]`). Used exclusively by Animation's
+        # KeyFrameTransform.Transforms -- never by ChildModel.Transforms
+        # (see _read_transform's comment). The v108 skip below is a
+        # separate, pre-existing case (v108 isn't covered by the v9-13 .bt
+        # at all and is documented elsewhere as a distinct structural
+        # variant); kept as-is, unaffected by this fix.
         transform = self._read_transform(f)
+
+        if self._version == 13:
+            f.seek(8, 1)
 
         if self._version == 108:
             f.seek(8, 1)
@@ -135,9 +154,27 @@ class ABCModelReader(object):
         animation = Animation()
         animation.extents = self._read_vector(f)
         animation.name = self._read_string(f)
-        animation.unknown1 = unpack('i', f)[0]
-        animation.interpolation_time = unpack('I', f)[0] if self._version >= 12 else 200
-        animation.keyframe_count = unpack('I', f)[0]
+        animation.unknown1 = unpack('i', f)[0]  # "Val" per ABC_V9-134.bt
+
+        # BESTAETIGT (2026-09, ABC_V9-132.bt/ABC_V9-134.bt, Sten): Val ist
+        # ein ECHTER Discriminator, keine Konstante. Nur wenn Val==-1 folgt
+        # (bei v12/v13 zusaetzlich ein UnkInt-Feld davor) die echte
+        # KeyFrameCount als eigenes Feld. Wenn Val!=-1, IST Val selbst
+        # bereits die KeyFrameCount -- dann folgen GAR KEINE weiteren
+        # Felder hier. Vorher wurde IMMER so gelesen als waere Val==-1
+        # (unconditional 4 oder 8 Extra-Bytes je nach Version) -- in allen
+        # ~25 bisher geprueften echten Animationen (6 Testdateien v9-v13)
+        # war Val zwar tatsaechlich immer -1 (dieser else-Zweig also nie
+        # empirisch beobachtet), aber das war reines Glueck: bei einer
+        # einzigen Animation mit Val!=-1 in einer echten Datei haette das
+        # eine Fehlausrichtung fuer KeyFrames/Transforms dieser UND aller
+        # nachfolgenden Animationen im selben Array verursacht.
+        if animation.unknown1 == -1:
+            animation.interpolation_time = unpack('I', f)[0] if self._version >= 12 else 200
+            animation.keyframe_count = unpack('I', f)[0]
+        else:
+            animation.interpolation_time = 200
+            animation.keyframe_count = animation.unknown1
         animation.keyframes = [self._read_keyframe(f) for _ in range(animation.keyframe_count)]
         animation.node_keyframe_transforms = []
         for _ in range(self._node_count):
@@ -260,6 +297,30 @@ class ABCModelReader(object):
                 elif section_name == 'AnimBindings':
                     anim_binding_count = unpack('I', f)[0]
                     model.anim_bindings = [self._read_anim_binding(f) for _ in range(anim_binding_count)]
+
+                    # BESTAETIGT (2026-09, ABC_V9-134.bt v1.6, Sten -- byte-
+                    # exakt bis Dateiende verifiziert an ARCHER.ABC v13
+                    # (ChildModelCount=2 -> 1 Extra-Block/54 Eintraege) und
+                    # hero_action.abc v12 (ChildModelCount=3 -> 2 Extra-
+                    # Bloecke/336+16 Eintraege)): nach der "internen"
+                    # AnimBindings-Sektion folgt -- OHNE eigenen Section-
+                    # Marker, einfach direkt im Anschluss -- pro ECHTEM
+                    # ChildModel (Index >=1; Index 0 ist immer der leere
+                    # Platzhalter, der das Modell selbst repraesentiert)
+                    # noch ein WEITERER Block im exakt gleichen Format wie
+                    # oben (uint32 Count + Count*AnimBinding). Kommt nur
+                    # vor wenn len(model.child_models) >= 2 -- bei <=1
+                    # (kein oder nur der Platzhalter) endet die Datei
+                    # direkt hier. Vorher komplett ungelesen (kein Bug im
+                    # Sinne von Datenkorruption -- next_section_offset ist
+                    # hier -1, die Sektions-Schleife endet ohnehin -- aber
+                    # echte, bisher liegen gelassene Daten).
+                    model.child_model_anim_bindings = []
+                    extra_count = max(len(model.child_models) - 1, 0)
+                    for _ in range(extra_count):
+                        cm_binding_count = unpack('I', f)[0]
+                        model.child_model_anim_bindings.append(
+                            [self._read_anim_binding(f) for _ in range(cm_binding_count)])
                 elif section_name == 'HitGroups' and self._version == 108:
                     hitgroups_count = unpack('I', f)[0]
                     #model.hitgroups = [self._read_hitgroups(f) for _ in range(hitgroups_count)]

@@ -338,11 +338,27 @@ class DHNPD3DModelReader(object):
         return node
 
     def _read_transform(self, f):
+        # Plain "Transform" struct: Location+Rotation, NOTHING else, for any
+        # version -- used by ChildModel.Transforms. This used to also carry
+        # the v13 extra-8-bytes skip (copy-pasted 1:1 from reader_abc_pc.py's
+        # same pre-fix bug -- see that file's identical comment). Same fix
+        # applied here since this reader shares the same section layout
+        # (ABC body vs. D3D-hybrid body use byte-identical Header/Nodes/
+        # ChildModels/Animation/Sockets/AnimBindings, per this class's own
+        # docstring/comments elsewhere in this file) -- moved the skip into
+        # _read_anim_transform, the only other caller (2026-09, Sten).
         transform = Animation.Keyframe.Transform()
         transform.location = self._read_vector(f)
         transform.rotation = self._read_quaternion(f)
+        return transform
+
+    def _read_anim_transform(self, f):
+        # AnimTransform struct: plain Transform PLUS, only for v13, two
+        # extra unknown floats. Used exclusively by Animation's keyframe
+        # transforms -- never by ChildModel.Transforms.
+        transform = self._read_transform(f)
         if self._version == 13:
-            f.seek(8, 1)  # Two unknown floats (v13 only)
+            f.seek(8, 1)
         return transform
 
     def _read_child_model(self, f):
@@ -362,16 +378,26 @@ class DHNPD3DModelReader(object):
         animation = Animation()
         animation.extents = self._read_vector(f)
         animation.name = self._read_string(f)
-        animation.unknown1 = unpack('i', f)[0]
-        animation.interpolation_time = unpack('I', f)[0] if self._version >= 12 else 200
-        animation.keyframe_count = unpack('I', f)[0]
+        animation.unknown1 = unpack('i', f)[0]  # "Val" -- same discriminator
+        # as reader_abc_pc.py's Animation.Val (see that file's comment for
+        # the full explanation): only when Val==-1 do the extra
+        # UnkInt(v12/v13)/RealKeyFrameCount fields follow; otherwise Val
+        # itself IS the keyframe count and nothing else follows. Same fix
+        # applied here as in reader_abc_pc.py (2026-09, Sten) -- previously
+        # this always read as if Val==-1, matching that file's pre-fix bug.
+        if animation.unknown1 == -1:
+            animation.interpolation_time = unpack('I', f)[0] if self._version >= 12 else 200
+            animation.keyframe_count = unpack('I', f)[0]
+        else:
+            animation.interpolation_time = 200
+            animation.keyframe_count = animation.unknown1
         animation.keyframes = [self._read_keyframe(f) for _ in range(animation.keyframe_count)]
         animation.node_keyframe_transforms = []
         for _ in range(self._node_count):
             if self._version >= 13:
                 f.seek(4, 1)  # -1 marker
             animation.node_keyframe_transforms.append(
-                [self._read_transform(f) for _ in range(animation.keyframe_count)])
+                [self._read_anim_transform(f) for _ in range(animation.keyframe_count)])
         return animation
 
     def _read_socket(self, f):
@@ -462,4 +488,25 @@ class DHNPD3DModelReader(object):
                 elif section_name == 'AnimBindings':
                     anim_binding_count = unpack('I', f)[0]
                     model.anim_bindings = [self._read_anim_binding(f) for _ in range(anim_binding_count)]
+
+                    # BESTAETIGT (2026-09, Sten, gegen ALEXANDER.LTB v13,
+                    # DHNP-D3D, ChildModelCount=4/3 echte): die von
+                    # reader_abc_pc.py bekannte ChildModelAnimBindings-
+                    # Erweiterung (ein weiterer AnimBindingHeader-Block PRO
+                    # ECHTEM ChildModel, Index>=1) gilt auch hier -- vorher
+                    # nur eine unverifizierte Vermutung, jetzt bytegenau
+                    # bestaetigt: nach der internen AnimBindings-Section
+                    # blieben bei ALEXANDER.LTB genau 12 Byte bis EOF uebrig
+                    # (vorher komplett ungelesen) -- exakt 3 * 4 Byte, d.h.
+                    # drei weitere Blocks mit je Count=0 (keine Bindings),
+                    # extra_count = ChildModelCount-1 = 3 passt exakt, 0
+                    # Byte Rest. Kein einziger Eintrag befuellt in dieser
+                    # Datei, aber die Struktur (Anzahl+Groesse der Blocks)
+                    # stimmt exakt.
+                    model.child_model_anim_bindings = []
+                    extra_count = max(len(model.child_models) - 1, 0)
+                    for _ in range(extra_count):
+                        cm_binding_count = unpack('I', f)[0]
+                        model.child_model_anim_bindings.append(
+                            [self._read_anim_binding(f) for _ in range(cm_binding_count)])
         return model

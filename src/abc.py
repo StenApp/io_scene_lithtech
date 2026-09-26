@@ -259,6 +259,12 @@ class Model(object):
         self.lod_distances = []
         self.weight_sets = []
         self.anim_bindings = []
+        # Per-real-ChildModel anim-bindings trailing the main AnimBindings
+        # section (ABC v9-13 PC only so far) -- see reader_abc_pc.py's
+        # AnimBindings handling for the full explanation. One entry per
+        # child_models[1:] (index 0 is always the empty self-model
+        # placeholder), each entry itself a list of AnimBinding.
+        self.child_model_anim_bindings = []
 
         # ABC v6 specific
 
