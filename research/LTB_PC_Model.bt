@@ -1,0 +1,566 @@
+//------------------------------------------------
+//--- 010 Editor v11.0 Binary Template
+//
+//      File: pc_ltb.bt
+//   Authors:
+//   Version:
+//   Purpose:
+//  Category:
+// File Mask:
+//  ID Bytes:
+//   History: 2026-09 (Sten/Claude) -- zwei Fixes gegen PLAYER_ACTION.LTB/
+//            PLAYERBASE.LTB/DEATHBASE.LTB/HERO_ACTION.LTB (v23) verifiziert,
+//            gegen den bytegenau bestaetigten Python-Reader
+//            (reader_ltb_pc.py, io_scene_lithtech):
+//            1) Node war als SELBST-REKURSIVES Struct modelliert (struct
+//               Node{ struct Node; ...; Node Children[ChildrenCount]; };
+//               aufgerufen als einzelnes "Node nodes;"). Das setzt voraus,
+//               dass 010 Editor die gesamte Tiefensuche exakt so aufloest
+//               wie die Datei sie tatsaechlich anlegt -- vermutlich die
+//               Ursache fuer "Template passed end of file" bei Line 468
+//               (AnimHeader), weil ein Fehler in der Rekursion sich erst
+//               dort auswirkt. Der Python-Reader liest Nodes stattdessen
+//               als FLACHE Liste von exakt hdr.Nodes Eintraegen (die
+//               Tiefensuche/Parent-Child-Zuordnung wird erst NACHTRAEGLICH
+//               aus der Reihenfolge + ChildrenCount rekonstruiert, steht
+//               so NICHT im Byte-Layout). Hier auf die gleiche flache Form
+//               umgestellt -- deutlich robuster, keine Rekursion mehr.
+//            2) AnimBindingHeader-Aufruf am Ende: war schon vorher als
+//               "animBindings[hdr.ChildModels]" geschrieben, was zufaellig
+//               (oder schon bewusst?) exakt richtig ist -- siehe Kommentar
+//               dort. Nur noch dokumentiert, WARUM das stimmt (bytegenau
+//               verifiziert an PLAYER_ACTION.LTB [2 echte ChildModels,
+//               8 Byte Rest = 2x Count=0] und PLAYERBASE.LTB [0 echte
+//               ChildModels, 0 Byte Rest]): es ist EIN AnimBindingHeader-
+//               Block fuers Modell selbst PLUS je EINER pro echtem
+//               ChildModel (= hdr.ChildModels - 1 Stueck), zusammen also
+//               genau hdr.ChildModels Blocks (1 + (hdr.ChildModels-1) =
+//               hdr.ChildModels). Ob diese Extra-Blocks bei LTB PC jemals
+//               tatsaechlich befuellte Eintraege enthalten (nicht nur
+//               Count=0) ist an den bisher geprueften Dateien offen --
+//               nicht verifiziert, nur die Block-ANZAHL/-GROESSE.
+//------------------------------------------------
+
+local int RigidMesh = 4;
+local int SkeletalMesh = 5;
+local int VertexAnimatedMesh = 6;
+local int NullMesh = 7;
+
+// Stream Data Flags
+local int VTX_Position      = 0x0001;
+local int VTX_Normal        = 0x0002;
+local int VTX_Colour        = 0x0004;
+local int VTX_UV_Sets_1     = 0x0010;
+local int VTX_UV_Sets_2     = 0x0020;
+local int VTX_UV_Sets_3     = 0x0040;
+local int VTX_UV_Sets_4     = 0x0080;
+local int VTX_BasisVector   = 0x0100;
+
+// Animation Compression Types
+local int CMP_None = 0;
+local int CMP_Relevant = 1;
+local int CMP_Relevant_16 = 2;
+local int CMP_Relevant_Rot16 = 3;
+
+struct LTString {
+    short Length;
+    if (Length > 0) {
+        char Value[Length];
+    }
+};
+
+struct LTUV {
+    float u,v;
+};
+
+// Divide by 16
+struct LTCompressedVector {
+    short x,y,z;
+};
+
+struct LTVector {
+    float x,y,z;
+};
+
+// Divide by 0x7FFF
+struct LTCompressedQuat {
+    short x,y,z,w;
+};
+
+struct LTQuat {
+    float x,y,z,w;
+};
+
+struct LTMatrix {
+    LTQuat m[4];
+};
+
+struct OBB {
+    LTMatrix Matrix;
+    //LTVector Position;
+    //LTQuat Orientation;
+    //LTVector Dims;
+};
+
+struct Header {
+    short FileType;
+    short FileVersion;
+    int Filler[4];
+    int MeshVersion;
+
+    int KeyFrames;
+    int ParentAnims;
+    int Nodes;
+    int Pieces;
+    int ChildModels;
+    int Faces;
+    int Vertices;
+    int VertexWeights;
+    int LODs;
+    int Sockets;
+    int WeightSets;
+    int StringCount;
+    int StringLength;
+    int VertAnimationDataSize;
+    int AnimationData; // ?
+    LTString CommandString;
+    float Radius;
+    int OBBCount;
+    if (OBBCount > 0) {
+        OBB OBBData[OBBCount];
+    }
+    int PieceCount;
+};
+
+struct BoneSet {
+    unsigned short BoneIndexStart;
+    unsigned short BoneIndexCount;
+
+    unsigned char BoneList[4];
+    unsigned int IndexBufferIndex;
+};
+
+struct Piece {
+    int PieceType;
+
+    if (PieceType == NullMesh) {
+        int Filler;
+        return;
+    }
+
+    // Common data
+    int ObjSize;
+    int VertCount;
+    int FaceCount;
+    int MaxBonesPerFace;
+    int MaxBonesPerVert;
+
+    local int i = 0;
+    local int j = 0;
+
+    if (PieceType == RigidMesh) {
+        int DataType[4];
+        int Bone;
+
+        // Per DataType
+        for (i = 0; i < 4; i++) {
+
+            // Per Vert
+            for (j = 0; j < VertCount; j++) {
+                if (DataType[i] & VTX_Position) {
+                    LTVector Position;
+                }
+                if (DataType[i] & VTX_Normal) {
+                    LTVector Normal;
+                }
+                if (DataType[i] & VTX_Colour) {
+                    int RGBA;
+                }
+                if (DataType[i] & VTX_UV_Sets_1) {
+                    LTUV uv_1;
+                }
+                if (DataType[i] & VTX_UV_Sets_2) {
+                    LTUV uv_2;
+                }
+                if (DataType[i] & VTX_UV_Sets_3) {
+                    LTUV uv_3;
+                }
+                if (DataType[i] & VTX_UV_Sets_4) {
+                    LTUV uv_4;
+                }
+                if (DataType[i] & VTX_BasisVector) {
+                    LTVector S;
+                    LTVector T;
+                }
+            }
+        }
+
+        unsigned short IndexList[FaceCount*3];
+    }
+    else if (PieceType == SkeletalMesh) {
+        char ReindexedBones;
+        int DataType[4];
+
+        char MatrixPalette;
+
+        if (MatrixPalette == 0) {
+
+            // Per DataType
+            for (i = 0; i < 4; i++) {
+
+                // Per Vert
+                for (j = 0; j < VertCount; j++) {
+                    if (DataType[i] & VTX_Position) {
+                        LTVector Position;
+
+                        if (MaxBonesPerFace >= 2) {
+                            float Blend1;
+                        }
+                        if (MaxBonesPerFace >= 3) {
+                            float Blend2;
+                        }
+                        if (MaxBonesPerFace >= 4) {
+                            float Blend3;
+                        }
+                    }
+                    if (DataType[i] & VTX_Normal) {
+                        LTVector Normal;
+                    }
+                    if (DataType[i] & VTX_Colour) {
+                        int RGBA;
+                    }
+                    if (DataType[i] & VTX_UV_Sets_1) {
+                        LTUV uv_1;
+                    }
+                    if (DataType[i] & VTX_UV_Sets_2) {
+                        LTUV uv_2;
+                    }
+                    if (DataType[i] & VTX_UV_Sets_3) {
+                        LTUV uv_3;
+                    }
+                    if (DataType[i] & VTX_UV_Sets_4) {
+                        LTUV uv_4;
+                    }
+                    if (DataType[i] & VTX_BasisVector) {
+                        LTVector S;
+                        LTVector T;
+                    }
+                } // End Per Vert
+            } // End Per DataType
+
+            unsigned short IndexList[FaceCount*3];
+
+            int BoneSetCount;
+            BoneSet BoneSets[BoneSetCount];
+
+        } else {
+            int MinBone;
+            int MaxBone;
+
+            if (ReindexedBones) {
+                int ReindexedBoneCount;
+                int ReindexedBoneList[ReindexedBoneCount];
+            }
+
+            // Per DataType
+            for (i = 0; i < 4; i++) {
+
+                // Per Vert
+                for (j = 0; j < VertCount; j++) {
+                    if (DataType[i] & VTX_Position) {
+                        // No position data if MaxBonesPerVert == 1?
+
+                        if (MaxBonesPerVert >= 2) {
+                            LTVector Position;
+                            float Blend1;
+                        }
+                        if (MaxBonesPerVert >= 3) {
+                            float Blend2;
+                        }
+                        if (MaxBonesPerVert >= 4) {
+                            float Blend3;
+                        }
+
+                        // Needs to be last
+                        if (MaxBonesPerVert >= 2) {
+                            int Index;
+                        }
+                    }
+                    if (DataType[i] & VTX_Normal) {
+                        LTVector Normal;
+                    }
+                    if (DataType[i] & VTX_Colour) {
+                        int RGBA;
+                    }
+                    if (DataType[i] & VTX_UV_Sets_1) {
+                        LTUV uv_1;
+                    }
+                    if (DataType[i] & VTX_UV_Sets_2) {
+                        LTUV uv_2;
+                    }
+                    if (DataType[i] & VTX_UV_Sets_3) {
+                        LTUV uv_3;
+                    }
+                    if (DataType[i] & VTX_UV_Sets_4) {
+                        LTUV uv_4;
+                    }
+                    if (DataType[i] & VTX_BasisVector) {
+                        LTVector S;
+                        LTVector T;
+                    }
+                } // End Per Vert
+            } // End Per DataType
+
+
+            unsigned short IndexList[FaceCount*3];
+
+
+        } // Matrix Palette
+
+    }
+    else if (PieceType == VertexAnimatedMesh)
+    {
+        int unk;
+        int DataType[4];
+        int unk;
+        int unk;
+
+        // per DataType
+        for (i = 0; i < 4; i++) {
+            // Per Vert
+            for (j = 0; j < VertCount; j++) {
+                if (DataType[i] & VTX_Position) {
+                    LTVector Position;
+                }
+                if (DataType[i] & VTX_Normal) {
+                    LTVector Normal;
+                }
+                if (DataType[i] & VTX_Colour) {
+                    int RGBA;
+                }
+                if (DataType[i] & VTX_UV_Sets_1) {
+                    LTUV uv_1;
+                }
+                if (DataType[i] & VTX_UV_Sets_2) {
+                    LTUV uv_2;
+                }
+                if (DataType[i] & VTX_UV_Sets_3) {
+                    LTUV uv_3;
+                }
+                if (DataType[i] & VTX_UV_Sets_4) {
+                    LTUV uv_4;
+                }
+                if (DataType[i] & VTX_BasisVector) {
+                    LTVector S;
+                    LTVector T;
+                }
+            } // End Per Vert
+        } // End Per DataType
+        ushort IndexList[VertCount];
+        int unk;
+    }
+
+};
+
+struct LOD {
+    int TextureCount;
+    int Textures[4];
+    int RenderStyle;
+    char RenderPriority;
+    Piece piece;
+    char NodesUsedCount;
+    if (NodesUsedCount > 0) {
+        char NodesUsed[NodesUsedCount];
+    }
+};
+
+struct PieceHeader {
+    LTString Name;
+    int LODCount;
+    if (LODCount > 0) {
+        float LODDistances[LODCount];
+    }
+    int LODMin;
+    int LODMax;
+    if (LODCount > 0) {
+        LOD lods[LODCount] <optimize=false>;
+    }
+};
+
+// War vorher ein SELBST-REKURSIVES Struct (struct Node{ struct Node;
+// LTString Name; ...; int ChildrenCount; Node Children[ChildrenCount]; };),
+// aufgerufen als ein einzelnes "Node nodes;" -- setzt voraus, dass 010
+// Editor die Tiefensuche exakt richtig durchlaeuft. Der bytegenau
+// verifizierte Python-Reader liest die Nodes stattdessen als FLACHE Liste
+// von genau hdr.Nodes Eintraegen -- die Baumstruktur (wer ist wessen Kind)
+// wird NICHT im Byte-Layout kodiert, sondern erst danach aus der
+// Reihenfolge + ChildrenCount rekonstruiert (Tiefensuche ueber die flache
+// Liste). Hier entsprechend auf die flache Form umgestellt.
+struct Node {
+    LTString Name;
+    short Index;
+    char Flags;
+    LTMatrix Matrix;
+    int ChildrenCount;
+};
+
+struct WeightSet {
+    LTString Name;
+    int WeightCount;
+    if (WeightCount > 0) {
+        float Weights[WeightCount];
+    }
+};
+
+struct WeightSetHeader {
+    int WeightSetCount;
+    if (WeightSetCount > 0) {
+        WeightSet WeightSets[WeightSetCount]  <optimize=false>;
+    }
+};
+
+struct ChildModel {
+    int ChildModelCount;
+    if (ChildModelCount > 1) {
+        LTString ChildModels[ChildModelCount - 1] <optimize=false>;
+    }
+};
+
+struct KeyFrame {
+    unsigned int Time;
+    LTString CommandString;
+};
+
+struct AnimTransform (int CompressionType, int KeyFrameCount) {
+    if (CompressionType == CMP_None) {
+        char IsVertexAnimation;
+        // TODO: Figure out vertex animations
+        if (IsVertexAnimation == 0) {
+            // Transform
+            if (KeyFrameCount > 0) {
+                LTVector Translations[KeyFrameCount];
+                LTQuat Rotations[KeyFrameCount];
+            }
+        }
+        else
+        {
+            struct VertexKeyframe
+            {
+                int VertCount;
+                if (VertCount > 0) {
+                    float VertexData[VertCount * 3];
+                }
+            } VertexKeyframes[KeyFrameCount] <optimize=false>;
+        }
+    }
+    else if (CompressionType == CMP_Relevant) {
+        int KeyPosCount;
+        if (KeyPosCount > 0) {
+            LTVector Positions[KeyPosCount];
+        }
+        int KeyRotCount;
+        if (KeyRotCount > 0) {
+            LTQuat Rotations[KeyRotCount];
+        }
+    }
+    else if (CompressionType == CMP_Relevant_16) {
+        int KeyPosCount;
+        if (KeyPosCount > 0) {
+            LTCompressedVector Positions[KeyPosCount];
+        }
+        int KeyRotCount;
+        if (KeyRotCount > 0) {
+            LTCompressedQuat Rotations[KeyRotCount];
+        }
+    }
+    else if (CompressionType == CMP_Relevant_Rot16) {
+        int KeyPosCount;
+        if (KeyPosCount > 0) {
+            LTVector Positions[KeyPosCount];
+        }
+        int KeyRotCount;
+        if (KeyRotCount > 0) {
+            LTCompressedQuat Rotations[KeyRotCount];
+        }
+    }
+};
+
+struct Animation (int NodeCount) {
+    LTVector Dims;
+    LTString Name;
+    int CompressionType;
+    int Interp;
+    int KeyFrameCount;
+    if (KeyFrameCount > 0) {
+        KeyFrame Keyframes[KeyFrameCount] <optimize=false>;
+    }
+    if (NodeCount > 0) {
+        AnimTransform Transforms(CompressionType, KeyFrameCount)[NodeCount] <optimize=false>;
+    }
+
+};
+
+struct AnimHeader (int NodeCount) {
+    int AnimCount;
+    if (AnimCount > 0) {
+        Animation Anims(NodeCount)[AnimCount] <optimize=false>;
+    }
+};
+
+struct Socket {
+    int NodeIndex;
+    LTString Name;
+    LTQuat Rotation;
+    LTVector Position;
+    LTVector Scale;
+};
+
+struct SocketHeader {
+    int SocketCount;
+    if (SocketCount > 0) {
+        Socket Sockets[SocketCount] <optimize=false>;
+    }
+};
+
+struct AnimBinding {
+    LTString Name;
+    LTVector Dims;
+    LTVector Translation;
+};
+
+struct AnimBindingHeader {
+    int BindingCount;
+    if (BindingCount > 0) {
+        AnimBinding Binding[BindingCount] <optimize=false>;
+    }
+};
+
+Header hdr;
+if (hdr.PieceCount > 0) {
+    PieceHeader pieces[hdr.PieceCount] <optimize=false>;
+}
+if (hdr.Nodes > 0) {
+    Node nodes[hdr.Nodes] <optimize=false>;
+}
+WeightSetHeader weights;
+ChildModel childModels;
+AnimHeader anims(hdr.Nodes);
+SocketHeader sockets;
+
+// BESTAETIGT (2026-09, Sten/Claude, gegen reader_ltb_pc.py, byte-exakt an
+// PLAYER_ACTION.LTB [2 echte ChildModels: Deathbase.ltb, playerbase.ltb --
+// hdr.ChildModels=3, danach genau 8 Byte Rest = 2x AnimBindingHeader mit
+// Count=0, 0 Byte uebrig] und PLAYERBASE.LTB [0 echte ChildModels,
+// hdr.ChildModels=1, kein Rest] verifiziert): es gibt EINEN
+// AnimBindingHeader-Block fuers Modell selbst (dessen EIGENE Animationen,
+// per Name gematcht) PLUS je EINEN WEITEREN pro echtem ChildModel (also
+// hdr.ChildModels - 1 Stueck, da hdr.ChildModels sich selbst mitzaehlt) --
+// zusammen exakt hdr.ChildModels Blocks. Deshalb reicht "[hdr.ChildModels]"
+// hier tatsaechlich schon aus, OHNE weitere Anpassung. Ob diese
+// Extra-Blocks bei LTB PC (anders als bei ABC PC, wo sie an hero_action.abc
+// tatsaechlich mit echten Eintraegen befuellt waren) je mehr als Count=0
+// enthalten, ist an den bisher geprueften LTB-PC-Dateien nicht beobachtet --
+// offen, nicht verifiziert.
+if (hdr.ChildModels > 0) {
+    AnimBindingHeader animBindings[hdr.ChildModels] <optimize=false>;
+}

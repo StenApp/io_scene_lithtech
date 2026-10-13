@@ -2,8 +2,13 @@
 //--- 010 Editor Binary Template for ABC v9-v13 (PC)
 //--- Prints important values for comparison
 //
-//   Version: 1.1 (2026-09 -- generalized from a v13-only template to
-//            v9-13, two field-condition fixes applied, see History)
+//   Version: 1.7 (2026-09 -- corrected v1.6: for v12/v13 the two extra
+//            Animation fields (UnkInt, RealKeyFrameCount) are ALWAYS
+//            present, not just when Val==-1 -- found at deathbase.abc,
+//            where an animation has Val=18 (not -1) yet still has both
+//            extra fields. v9/v10/v11 unchanged, still -1-gated. See
+//            the Animation struct's own comment and the History entry
+//            below.)
 //   Purpose: LithTech ABC model format, PC, versions 9 through 13.
 //            v108 is a distinct variant with several structural
 //            differences (weight-set ordering, extra per-vertex/node/
@@ -13,7 +18,47 @@
 //            see pc_abc_v6.bt.
 //  ID Bytes: a raw uint32 Version field (9..13) right after the
 //            "Header" section marker.
-//   History: 2026-09 -- byte-exact verified against 9 real files across
+//   History: 2026-09 (v1.7) -- corrected v1.6: the two extra Animation
+//            fields for v12/v13 are unconditional, not -1-gated.
+//            Verified against deathbase.abc (v12, all 186 animations,
+//            including several with Val!=-1 like UPAm*D/sung*D) and
+//            re-verified hero_action.abc/ARCHER.ABC still match (both
+//            had Val==-1 throughout, so unconditional reading gives the
+//            same result there).
+//   History: 2026-09 (v1.6) -- corrected v1.5's ExternalAnimBlock model:
+//            it's not a flat list of blocks, it's one AnimBindingHeader
+//            block per real ChildModel (Sten's insight from the
+//            ChildModels[2] screenshot). Reused AnimBindingHeader
+//            directly. Verified against the same two files (ARCHER.ABC
+//            v13, hero_action.abc v12) with the corrected model, same
+//            exact-EOF result.
+//   History: 2026-09 (v1.5) -- discovered & added ExternalAnimBlock: data
+//            after AnimBindingHeader with no Section marker, one or more
+//            uint32-Count-prefixed blocks of (Name+float[6]) entries,
+//            repeated to exact EOF. Verified against ARCHER.ABC (v13, 1
+//            block/54 entries) and hero_action.abc (v12, 2 blocks/336+16
+//            entries) -- both land exactly on FileSize(). Absent in files
+//            without real ChildModels (poodle_action.abc etc.).
+//   History: 2026-09 (v1.4) -- every count-sized array wrapped in
+//            "if (Count > 0)" to stop 010 Editor's "array size is zero"
+//            warnings (Sockets and others reported). Cosmetic only, no
+//            offset changes.
+//   History: 2026-09 (v1.3) -- Val==-1 branch in Animation needs a THIRD
+//            field for v12/v13 (named UnkInt/InterpolationTime per an
+//            independent reference template, pc_abc_v13.bt) that v9-v11
+//            don't have. Verified against hero_action.abc (v12, all 16
+//            animations) and ARCHER.ABC (v13, all 5 animations incl. a
+//            real non-empty KeyFrame.Command "attacksound"). All 6 test
+//            files (v9-v13) now hit every CheckSection() exactly, zero
+//            mismatches.
+//   History: 2026-09 (v1.2) -- Animation.UnkInt/InterpolationTime removed,
+//            replaced by the real -1-conditional Val/KeyFrameCount field
+//            (see Animation struct comment); verified against
+//            1x1_square.abc/default.abc (v9), v10NODE_OFFSET.ABC (v10),
+//            poodle_action.abc (v11, all 4 real animations). CheckSection()
+//            added after every main-body section. v12 not yet re-verified
+//            against this fix -- already reported broken, not yet located.
+//   History: 2026-09 (v1.1) -- byte-exact verified against 9 real files across
 //            all five versions (1x1_square.abc/default.abc v9,
 //            NODE_OFFSET.ABC v10, poodle_action.abc v11,
 //            cosmonaut_action_helmet.abc/hero_action.abc v12,
@@ -148,6 +193,22 @@ struct Header {
     // eigenstaendig im File stehendes Feld -- keine Ableitung. Fix fuer
     // reader_abc_pc.py: das f.seek(4,1) im else-Zweig durch ein echtes
     // unpack('I', f) ersetzen, so wie es fuer Version==108 schon passiert.
+    //
+    // BESTAETIGT von der Original-Autoren-Toolseite (2026-09, Screenshot
+    // des ModelEdit "Level of Detail Generation"-Dialogs fuer ein echtes
+    // v12-Modell, source: StenApp): der Dialog listet 4 LOD-Eintraege
+    // (LOD 0..3, je mit eigenem Dist-Wert 300/600/1000/1500 und
+    // %Triangles 80/60/40/25) fuer ein Modell mit LODCount=5 im File --
+    // die 5. (feinste) Stufe ist das Original-Mesh selbst, braucht in der
+    // UI keinen eigenen Eintrag (100% Triangles, implizit). Bestaetigt
+    // LODCount = (Anzahl generierter Reduktionsstufen) + 1 = LODDistance-
+    // Count + 1 nicht nur rechnerisch, sondern aus der Tool-UI selbst.
+    // Der Dialog hat zusaetzlich "Minimum Node Tris" und "Maximum Edge
+    // Length" als Generierungs-Parameter -- ob/wie diese mit ABCv6s
+    // separatem Edge-Collapse-Schema (siehe pc_abc_v6.bt) zusammenhaengen,
+    // ist NICHT geklaert: dieser Screenshot ist explizit fuer ein v12-
+    // Modell, also dieses (Piece/LOD-Array-)System hier, nicht das v6-
+    // System. Nicht einfach auf v6 uebertragen ohne eigene Bestaetigung.
     uint32 LODDistanceCount;
     char Padding[60];
     if(LODDistanceCount > 0) {
@@ -184,7 +245,9 @@ struct Weight {
 struct Vertex {
     uint16 WeightCount;
     uint16 SubLODVertexIndex;
-    Weight Weights[WeightCount] <optimize=false>;
+    if (WeightCount > 0) {
+        Weight Weights[WeightCount] <optimize=false>;
+    }
     LTVector Location;
     LTVector Normal;
 
@@ -192,10 +255,14 @@ struct Vertex {
 
 struct LOD {
     uint32 FaceCount;
-    Face Faces[FaceCount] <optimize=false>;
+    if (FaceCount > 0) {
+        Face Faces[FaceCount] <optimize=false>;
+    }
     uint32 VertexCount;
     
-    Vertex Vertices[VertexCount] <optimize=false>;
+    if (VertexCount > 0) {
+        Vertex Vertices[VertexCount] <optimize=false>;
+    }
 };
 
 struct Piece (uint32 LODCount) {
@@ -228,7 +295,9 @@ struct PieceHeader (uint32 LODCount) {
     Printf("Total WeightCount: %d\n", WeightCount);
     Printf("PieceCount: %d\n", PieceCount);
     
-    Piece Pieces(LODCount)[PieceCount] <optimize=false>;
+    if (PieceCount > 0) {
+        Piece Pieces(LODCount)[PieceCount] <optimize=false>;
+    }
 };
 
 //
@@ -254,7 +323,9 @@ struct Node {
 struct WeightSet {
     LTString Name;
     uint32 NodeCount;
-    float NodeWeights[NodeCount] <optimize=false>;
+    if (NodeCount > 0) {
+        float NodeWeights[NodeCount] <optimize=false>;
+    }
 };
 
 struct WeightHeader {
@@ -275,7 +346,9 @@ local int globalChildIndex = 0;
 struct ChildModel (uint32 NodeCount) {
     LTString Name;
     uint32 BuildNumber;
-    Transform Transforms[NodeCount] <optimize=false>;
+    if (NodeCount > 0) {
+        Transform Transforms[NodeCount] <optimize=false>;
+    }
     
     Printf("\n=== CHILD MODEL[%d]", globalChildIndex);
     if(Name.stringLength > 0) {
@@ -295,7 +368,9 @@ struct ChildModelHeader (uint32 NodeCount) {
     Printf("\n=== CHILD MODELS SECTION ===\n");
     Printf("ChildModelCount: %d\n", ChildModelCount);
     
-    ChildModel ChildModels(NodeCount)[ChildModelCount] <optimize=false>;
+    if (ChildModelCount > 0) {
+        ChildModel ChildModels(NodeCount)[ChildModelCount] <optimize=false>;
+    }
 };
 
 //
@@ -319,21 +394,51 @@ struct KeyFrameTransform (uint32 KeyFrameCount) {
         int NegativeOne;
     }
     
-    AnimTransform Transforms[KeyFrameCount]  <optimize=false>;
+    if (KeyFrameCount > 0) {
+        AnimTransform Transforms[KeyFrameCount]  <optimize=false>;
+    }
 };
 
+// FUENFTE Runde (2026-09, Sten, an 7 Dateien ueber v9-v13 byte-exakt
+// verifiziert): bei v12/v13 sind Val, UnkInt und KeyFrameCount IMMER
+// alle drei vorhanden, unabhaengig davon ob Val -1 ist -- gefunden an
+// deathbase.abc (v12), wo Animation 113 ("UPAm*D") Val=18 (nicht -1!)
+// hat und trotzdem UnkInt=200 und KeyFrameCount=2 folgen. Die vorige
+// Version dieser Struct hatte -1 als Bedingung fuer beide
+// Versionsgruppen genommen -- fuer v12/v13 komplett falsch, hat dort
+// nur zufaellig gestimmt, weil in den bisherigen v12/v13-Testdateien
+// Val nie etwas anderes als -1 war. Bei v9/v10/v11 bleibt's dagegen
+// bei der Bedingung (Val==-1 -> 1 Extra-Feld KeyFrameCount, sonst Val
+// selbst ist KeyFrameCount) -- mit "immer 2 Extra-Felder" bricht
+// poodle_action.abc (v11).
+// Verifiziert an 1x1_square.abc/default.abc (v9), v10NODE_OFFSET.ABC
+// (v10), poodle_action.abc (v11, 4 Animationen), hero_action.abc (v12,
+// alle 16 Animationen; UND deathbase.abc, alle 186 Animationen inkl.
+// der Val!=-1-Faelle wie UPAm*D/UPRe*D/UMAm*D/sung*D/UTAm*D) und
+// ARCHER.ABC (v13, alle 5 Animationen, inkl. echtem
+// KeyFrame.Command-String "attacksound") -- exakte Uebereinstimmung
+// mit dem NextSectionOffset der AnimSection in allen 7 Dateien.
 struct Animation (int NodeCount) {
     LTVector Extents;
     LTString Name;
-    int UnkInt;
-    int InterpolationTime;
-    int KeyFrameCount;
-    KeyFrame KeyFrames[KeyFrameCount]  <optimize=false>;
-    KeyFrameTransform Transforms(KeyFrameCount)[NodeCount]  <optimize=false>;
-    
-    
-    
-    
+    int Val;
+    local int KeyFrameCount;
+    if (g_Version >= 12) {
+        int UnkInt;
+        int RealKeyFrameCount;
+        KeyFrameCount = RealKeyFrameCount;
+    } else if (Val == -1) {
+        int RealKeyFrameCount;
+        KeyFrameCount = RealKeyFrameCount;
+    } else {
+        KeyFrameCount = Val;
+    }
+    if (KeyFrameCount > 0) {
+        KeyFrame KeyFrames[KeyFrameCount]  <optimize=false>;
+    }
+    if (NodeCount > 0) {
+        KeyFrameTransform Transforms(KeyFrameCount)[NodeCount]  <optimize=false>;
+    }
 };
 
 //
@@ -351,7 +456,9 @@ struct SocketHeader {
     uint32 SocketCount;
     Printf("\n=== SOCKETS SECTION ===\n");
     Printf("SocketCount: %d\n", SocketCount);
-    Socket Sockets[SocketCount]  <optimize=false>;
+    if (SocketCount > 0) {
+        Socket Sockets[SocketCount]  <optimize=false>;
+    }
 };
 
 //
@@ -368,7 +475,39 @@ struct AnimBindingHeader {
     uint32 BindingCount;
     Printf("\n=== ANIM BINDINGS SECTION ===\n");
     Printf("BindingCount: %d\n", BindingCount);
-    AnimBinding AnimBindings[BindingCount] <optimize=false>;
+    if (BindingCount > 0) {
+        AnimBinding AnimBindings[BindingCount] <optimize=false>;
+    }
+};
+
+//
+// Per-ChildModel Anim Bindings (2026-09, Sten)
+//
+// Pro echtem ChildModel (Index >=1 in ChildModels.ChildModels -- Index 0
+// ist immer der leere Platzhalter, der das Modell selbst repraesentiert)
+// folgt nach der "internen" AnimBindingHeader-Section noch je ein
+// WEITERES AnimBindingHeader-Block, im exakt gleichen Format (kein
+// eigener Section-Marker, keine eigene Struktur noetig -- AnimBinding
+// selbst ist ja schon LTString Name + LTVector Extents + LTVector
+// Origin). Reihenfolge = Reihenfolge der ChildModels. Kommt gar nicht
+// vor, wenn ChildModelCount<=1 (nur der Platzhalter) -- Datei endet
+// dann direkt nach der internen AnimBindingHeader (z.B.
+// poodle_action.abc, 1x1_square.abc). Verifiziert an ARCHER.ABC (v13,
+// ChildModelCount=2 -> genau 1 Extra-Block fuer "base.abc", 54
+// Eintraege) und hero_action.abc (v12, ChildModelCount=3 -> genau 2
+// Extra-Bloecke fuer "basemodel.abc" (336 Eintraege) und "fembase.abc"
+// (16 Eintraege)) -- beide landen exakt auf Dateiende.
+local int globalCMBindingIndex = 0;
+
+struct ChildModelAnimBindings {
+    Printf("\n=== ANIM BINDINGS fuer ChildModel[%d]", globalCMBindingIndex + 1);
+    if (globalCMBindingIndex + 1 < ChildModels.ChildModelCount &&
+        ChildModels.ChildModels[globalCMBindingIndex + 1].Name.stringLength > 0) {
+        Printf(": %s", ChildModels.ChildModels[globalCMBindingIndex + 1].Name.Type);
+    }
+    Printf(" ===\n");
+    AnimBindingHeader Bindings;
+    globalCMBindingIndex++;
 };
 
 //
@@ -379,28 +518,61 @@ Printf("==============================================\n");
 Printf("ABC v9-13 DEBUG OUTPUT\n");
 Printf("==============================================\n");
 
+// Prueft nach jeder Section, ob die aktuelle Dateiposition mit dem
+// NextSection-Offset uebereinstimmt, den die Section selbst angibt.
+// Bei Abweichung: lauter Printf-Hinweis mit exakter Differenz -- das
+// ist der Ansatzpunkt, an dem als naechstes debuggt werden muss (siehe
+// z.B. den Kommentar an der Animation-Struct oben, so wurde deren Fix
+// gefunden). Kein Abbruch, damit man sieht, wie weit's danach noch
+// weitergeht/wo als naechstes was schiefgeht.
+void CheckSection(string label, uint32 expected) {
+    local uint32 actual = FTell();
+    if (actual != expected) {
+        Printf("\n!!! SECTION-MISMATCH nach %s: FTell()=%u erwartet(NextSection)=%u Differenz=%d !!!\n",
+               label, actual, expected, (int64)actual - (int64)expected);
+    } else {
+        Printf("--- %s: Section-Grenze exakt getroffen (%u) ---\n", label, actual);
+    }
+}
+
 Section section;
 Header hdr;
 
 Section pieceSection;
 PieceHeader piece(hdr.LODCount);
+CheckSection("Pieces", pieceSection.NextSection);
 
 Section nodeSection;
-Node nodes[hdr.NodeCount]  <optimize=false>;
+if (hdr.NodeCount > 0) {
+    Node nodes[hdr.NodeCount]  <optimize=false>;
+}
 WeightHeader weightsets;
+CheckSection("Nodes+Weights", nodeSection.NextSection);
 
 Section childSection;
 ChildModelHeader ChildModels(hdr.NodeCount);
+CheckSection("ChildModels", childSection.NextSection);
 
 Section AnimSection;
 AnimationHeader animHdr;
-Animation anim(hdr.NodeCount)[animHdr.AnimCount]  <optimize=false>;
+if (animHdr.AnimCount > 0) {
+    Animation anim(hdr.NodeCount)[animHdr.AnimCount]  <optimize=false>;
+}
+CheckSection("Animations", AnimSection.NextSection);
 
 Section SocketSection;
 SocketHeader Sockets;
+CheckSection("Sockets", SocketSection.NextSection);
 
 Section AnimBindingsSection;
 AnimBindingHeader AnimBindings;
+
+local int cmExtraCount = (ChildModels.ChildModelCount > 0) ? (ChildModels.ChildModelCount - 1) : 0;
+if (cmExtraCount > 0) {
+    ChildModelAnimBindings childModelBindings[cmExtraCount] <optimize=false>;
+}
+Printf("\n%d ChildModel-AnimBindings-Block(e), Dateiende exakt erreicht: %s\n",
+       cmExtraCount, (FTell() == FileSize()) ? "ja" : "NEIN");
 
 Printf("\n==============================================\n");
 Printf("END OF DEBUG OUTPUT\n");

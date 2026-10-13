@@ -1,0 +1,407 @@
+//------------------------------------------------
+//--- 010 Editor Binary Template for ABC v9-v13 (PC)
+//--- Prints important values for comparison
+//
+//   Version: 1.1 (2026-09 -- generalized from a v13-only template to
+//            v9-13, two field-condition fixes applied, see History)
+//   Purpose: LithTech ABC model format, PC, versions 9 through 13.
+//            v108 is a distinct variant with several structural
+//            differences (weight-set ordering, extra per-vertex/node/
+//            keyframe fields, HitGroups section) -- NOT covered here,
+//            see pc_abc_108.bt instead. ABCv6 ("MonolithExport Model
+//            File v6") is a different, unrelated format entirely --
+//            see pc_abc_v6.bt.
+//  ID Bytes: a raw uint32 Version field (9..13) right after the
+//            "Header" section marker.
+//   History: 2026-09 -- byte-exact verified against 9 real files across
+//            all five versions (1x1_square.abc/default.abc v9,
+//            NODE_OFFSET.ABC v10, poodle_action.abc v11,
+//            cosmonaut_action_helmet.abc/hero_action.abc v12,
+//            mm9_BANSHEE.ABC/mm9_PLAYER.ABC/mm9_WEAPONRACKNS.ABC v13;
+//            source: StenApp):
+//              - Piece.LODWeight generalized from "always present" (this
+//                template was v13-only before) to "if (g_Version>9)" --
+//                confirmed absent at v9, present at v10/v11/v12/v13.
+//              - Header.LODDistanceCount was already read explicitly here
+//                (good) rather than skipped/derived like reader_abc_pc.py
+//                does for Version!=108 -- confirmed its value always
+//                equals LODCount-1 across LODCount 1,1,1,1,2,4,4,5, never
+//                just LODCount. Kept as-is, no template change needed,
+//                noted here since it's the counterpart fix to the above.
+//              - v10 (NODE_OFFSET.ABC) checked specifically for a
+//                v10-only structural difference (the filename hints at
+//                one) -- found none. Header/Pieces/Nodes all match
+//                byte-exact with the same logic as v11-13; the apparent
+//                4-byte mismatch on a first pass was just this checker
+//                forgetting the WeightSetCount+WeightSets that trail the
+//                Nodes list for every non-108 version, not a real v10
+//                quirk. v10 is structurally identical to v9(+LODWeight)/
+//                v11/v12/v13 as far as this template goes.
+//
+// ABC VERSION MAP (2026-09, which games use which version -- v6 is by far
+// the most heavily verified: ~1150 real files across 5 games, see
+// pc_abc_v6.bt's own header; v9-13 here each rest on only 1-3 files):
+//   v6  -- Shogo, Blood II, KISS Psycho Circus, TNN Outdoors Pro Hunter 2,
+//          Sanity: Aiken's Artifact  (NOT covered by this template)
+//   v9  -- NOLF1 (dummy/placeholder assets: default.abc, 1x1_square.abc)
+//   v10 -- Legends of Might and Magic
+//   v11 -- NOLF1 (e.g. poodle_action.abc)
+//   v12 -- NOLF1, Aliens versus Predator 2
+//   v13 -- Legends of Might and Magic, Might and Magic IX
+//   v108 -- not encountered in this investigation, untested
+// NOLF1 alone spans v9/v11/v12 -- format version is a per-asset/per-export
+// choice, not fixed per game.
+//------------------------------------------------
+typedef unsigned char uint8;
+
+struct Section {
+    short stringLength;
+    char Type[stringLength] <optimize=false>;
+    uint32 NextSection;
+};
+
+struct LTString {
+    short stringLength;
+    if(stringLength > 0) {
+        char Type[stringLength] <optimize=false>;
+    }
+};
+
+struct LTTexCoord {
+    float u,v;
+};
+
+struct LTVector {
+    float x,y,z;
+};
+
+struct LTRotation {
+    float x,y,z,w;
+};
+
+struct LTMatrix {
+    LTRotation m[4];
+};
+
+struct Transform {
+    LTVector Location;
+    LTRotation Rotation;
+};
+
+// Global variable to store version
+local uint32 g_Version = 0;
+
+struct AnimTransform {
+    LTVector Location;
+    LTRotation Rotation;
+    
+    // Unknown floats only in v13
+    if(g_Version >= 13) {
+        float Unknown[2];
+    }
+};
+
+//
+// Header Data
+//
+
+struct Header {
+    uint32 Version;
+    
+    // Store version globally for other structs
+    g_Version = Version;
+    
+    uint32 KeyframeCount;
+    uint32 AnimationCount;
+    uint32 NodeCount;
+    uint32 PieceCount;
+    uint32 ChildModelCount;
+    uint32 FaceCount;
+    uint32 VertexCount;
+    uint32 WeightCount;
+    uint32 LODCount;
+    uint32 SocketCount;
+    uint32 WeightSetCount;
+    
+    // Unknown field only exists in v13
+    if(Version >= 13) {
+        uint32 Unknown;
+    }
+    
+    uint32 StringCount;
+    uint32 StringLengthTotal;
+    LTString CommandString;
+    float InternalRadius;
+    // BESTAETIGT (2026-09, byte-exakt an echten Dateien verifiziert --
+    // 1x1_square.abc/default.abc v9, poodle_action.abc v11,
+    // cosmonaut_action_helmet.abc v12, hero_action.abc v12/LODCount=5):
+    // reader_abc_pc.py im Plugin behandelt dieses Feld fuer Version != 108
+    // FALSCH -- es wird per f.seek(4,1) einfach UEBERSPRUNGEN statt
+    // gelesen, und stattdessen self._lod_dist_count = self._lod_count
+    // angenommen (also gleich LODCount). Das ist bei LODCount=1 zufaellig
+    // unauffaellig (waere ohnehin 0 vs. 1, beides klein), fliegt aber bei
+    // hero_action.abc (LODCount=5) sofort auf: LODDistanceCount steht dort
+    // tatsaechlich auf 4, nicht 5 -- und dieses Template hier liest es
+    // (richtig!) explizit statt es zu ueberspringen/herzuleiten. Der
+    // gespeicherte Wert entspricht in allen Testfiles LODCount-1 (Distanz-
+    // Schwellen LIEGEN ZWISCHEN Stufen), aber es ist ein echtes,
+    // eigenstaendig im File stehendes Feld -- keine Ableitung. Fix fuer
+    // reader_abc_pc.py: das f.seek(4,1) im else-Zweig durch ein echtes
+    // unpack('I', f) ersetzen, so wie es fuer Version==108 schon passiert.
+    uint32 LODDistanceCount;
+    char Padding[60];
+    if(LODDistanceCount > 0) {
+        float LODDistances[LODDistanceCount] <optimize=false>;
+    }
+    
+    Printf("\n=== HEADER ===\n");
+    Printf("Version: %d\n", Version);
+    Printf("NodeCount: %d\n", NodeCount);
+    Printf("VertexCount: %d\n", VertexCount);
+    Printf("WeightCount: %d\n", WeightCount);
+};
+
+//
+// Piece Data
+//
+
+struct FaceVertex {
+    LTTexCoord TexCoord;
+    uint16 VertexIndex;
+};
+
+struct Face {
+    FaceVertex Vertices[3];
+};
+
+struct Weight {
+    uint32 NodeIndex;
+    LTVector Location;
+    float Bias;
+};
+
+
+struct Vertex {
+    uint16 WeightCount;
+    uint16 SubLODVertexIndex;
+    Weight Weights[WeightCount] <optimize=false>;
+    LTVector Location;
+    LTVector Normal;
+
+};
+
+struct LOD {
+    uint32 FaceCount;
+    Face Faces[FaceCount] <optimize=false>;
+    uint32 VertexCount;
+    
+    Vertex Vertices[VertexCount] <optimize=false>;
+};
+
+struct Piece (uint32 LODCount) {
+    uint16 MaterialIndex;
+    float SpecularPower;
+    float SpecularScale;
+    // BESTAETIGT (2026-09, byte-exakt an 8 Dateien ueber v9/v11/v12/v13
+    // verifiziert): LODWeight ist ab genau Version>9 vorhanden -- fehlt
+    // bei v9 (1x1_square.abc, default.abc), vorhanden bei v11
+    // (poodle_action.abc), v12 (cosmonaut_action_helmet.abc,
+    // hero_action.abc) und v13 (mm9_BANSHEE.ABC, mm9_PLAYER.ABC,
+    // mm9_WEAPONRACKNS.ABC). Verifiziert per Endoffset-Abgleich gegen den
+    // im File hinterlegten NextSectionOffset der Pieces-Sektion: mit
+    // LODWeight trifft er bei v11-13 exakt, ohne stuerzt die Struktur
+    // sofort ab; bei v9 ist es exakt umgekehrt. Die alte Annahme "nur bei
+    // Version==12" (frueher in pc_abc.bt) ist damit widerlegt.
+    if (g_Version > 9)
+        float LODWeight;
+    uint16 Unknown;
+    LTString Name;
+    
+    LOD LODs[LODCount] <optimize=false>;
+};
+
+struct PieceHeader (uint32 LODCount) {
+    uint32 WeightCount;
+    uint32 PieceCount;
+    
+    Printf("\n=== PIECES SECTION ===\n");
+    Printf("Total WeightCount: %d\n", WeightCount);
+    Printf("PieceCount: %d\n", PieceCount);
+    
+    Piece Pieces(LODCount)[PieceCount] <optimize=false>;
+};
+
+//
+// Node Data
+//
+
+local int globalNodeIndex = 0;
+
+struct Node {
+    LTString Name;
+    uint16 Index;
+    uint8 Flags;
+    LTMatrix BindMatrix;
+    uint32 ChildCount;
+
+    globalNodeIndex++;
+};
+
+//
+// Weight Data
+//
+
+struct WeightSet {
+    LTString Name;
+    uint32 NodeCount;
+    float NodeWeights[NodeCount] <optimize=false>;
+};
+
+struct WeightHeader {
+    uint32 WeightSetCount;
+    
+    // Nur erstellen wenn > 0
+    if(WeightSetCount > 0) {
+        WeightSet WeightSets[WeightSetCount] <optimize=false>;
+    }
+};
+
+//
+// Child Models
+// 
+
+local int globalChildIndex = 0;
+
+struct ChildModel (uint32 NodeCount) {
+    LTString Name;
+    uint32 BuildNumber;
+    Transform Transforms[NodeCount] <optimize=false>;
+    
+    Printf("\n=== CHILD MODEL[%d]", globalChildIndex);
+    if(Name.stringLength > 0) {
+        Printf(": %s", Name.Type);
+    }
+    Printf(" ===\n");
+    Printf("  BuildNumber: %d\n", BuildNumber);
+    
+    
+    
+    globalChildIndex++;
+};
+
+struct ChildModelHeader (uint32 NodeCount) {
+    uint16 ChildModelCount;
+    
+    Printf("\n=== CHILD MODELS SECTION ===\n");
+    Printf("ChildModelCount: %d\n", ChildModelCount);
+    
+    ChildModel ChildModels(NodeCount)[ChildModelCount] <optimize=false>;
+};
+
+//
+// Animation Data
+//
+
+struct AnimationHeader {
+    int AnimCount;
+    Printf("\n=== ANIMATION SECTION ===\n");
+    Printf("AnimCount: %d\n", AnimCount);
+};
+
+struct KeyFrame {
+    int Time;
+    LTString Command;
+};
+
+struct KeyFrameTransform (uint32 KeyFrameCount) {
+    // -1 marker only in v13
+    if(g_Version >= 13) {
+        int NegativeOne;
+    }
+    
+    AnimTransform Transforms[KeyFrameCount]  <optimize=false>;
+};
+
+struct Animation (int NodeCount) {
+    LTVector Extents;
+    LTString Name;
+    int UnkInt;
+    int InterpolationTime;
+    int KeyFrameCount;
+    KeyFrame KeyFrames[KeyFrameCount]  <optimize=false>;
+    KeyFrameTransform Transforms(KeyFrameCount)[NodeCount]  <optimize=false>;
+    
+    
+    
+    
+};
+
+//
+// Socket Data
+//
+
+struct Socket {
+    uint32 NodeIndex;
+    LTString Name;
+    LTRotation Rotation;
+    LTVector Location;
+};
+
+struct SocketHeader {
+    uint32 SocketCount;
+    Printf("\n=== SOCKETS SECTION ===\n");
+    Printf("SocketCount: %d\n", SocketCount);
+    Socket Sockets[SocketCount]  <optimize=false>;
+};
+
+//
+// AnimBinding Data
+//
+
+struct AnimBinding {
+    LTString Name;
+    LTVector Extents;
+    LTVector Origin;
+};
+
+struct AnimBindingHeader {
+    uint32 BindingCount;
+    Printf("\n=== ANIM BINDINGS SECTION ===\n");
+    Printf("BindingCount: %d\n", BindingCount);
+    AnimBinding AnimBindings[BindingCount] <optimize=false>;
+};
+
+//
+// GO!
+// 
+
+Printf("==============================================\n");
+Printf("ABC v9-13 DEBUG OUTPUT\n");
+Printf("==============================================\n");
+
+Section section;
+Header hdr;
+
+Section pieceSection;
+PieceHeader piece(hdr.LODCount);
+
+Section nodeSection;
+Node nodes[hdr.NodeCount]  <optimize=false>;
+WeightHeader weightsets;
+
+Section childSection;
+ChildModelHeader ChildModels(hdr.NodeCount);
+
+Section AnimSection;
+AnimationHeader animHdr;
+Animation anim(hdr.NodeCount)[animHdr.AnimCount]  <optimize=false>;
+
+Section SocketSection;
+SocketHeader Sockets;
+
+Section AnimBindingsSection;
+AnimBindingHeader AnimBindings;
+
+Printf("\n==============================================\n");
+Printf("END OF DEBUG OUTPUT\n");
+Printf("==============================================\n");
