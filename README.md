@@ -16,11 +16,11 @@ To download the respository, click the green `Code -> Download ZIP` at the top o
 
 Format | Import | Export
 --- | --- | ---
-ABCv6 | Full | Full
-ABCv13 | Rigid and Skeletal | Limited
-LTA | No | Rigid and Skeletal
-LTB (PS2) | Rigid and Skeletal | No
-LTB (PC) | Rigid and Skeletal | No
+ABCv6 | No | No
+ABCv13 | Rigid and Skeletal | as LTA
+LTA | Full | Rigid and Skeletal
+LTB (PS2) | Rigid and Skeletal | as LTA
+LTB (PC) | Rigid and Skeletal | as LTA
 
 The ABC file format description can be found on our wiki [here](https://github.com/cmbasnett/io_scene_abc/wiki/ABC).
 
